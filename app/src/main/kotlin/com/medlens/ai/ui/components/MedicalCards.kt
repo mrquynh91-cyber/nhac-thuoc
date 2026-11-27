@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.AlarmAdd
 import androidx.compose.material.icons.filled.AlarmOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -544,7 +543,6 @@ fun RecordDetailScreen(
     isChatReplying: Boolean,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
-    onDelete: () -> Unit,
     onSaveCustomReminder: (MedicationReminder) -> Unit,
     onSendChatQuestion: (String) -> Unit,
     onSendChatVoice: (File) -> Unit,
@@ -654,11 +652,6 @@ fun RecordDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Xóa phiếu", tint = AlertRed)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -121,7 +121,6 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             isChatReplying = isChatReplying,
             snackbarHostState = snackbarHostState,
             onBack = { vm.closeRecordDetail() },
-            onDelete = { vm.deleteRecord(record.id) },
             onSaveCustomReminder = { reminder ->
                 vm.saveReminder(reminder)
             },

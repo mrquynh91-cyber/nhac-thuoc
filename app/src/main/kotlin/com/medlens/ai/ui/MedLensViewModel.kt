@@ -442,15 +442,6 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         _snackbarMessage.value = "Đã tạo đơn thuốc mẫu — bấm 'Chọn giờ & Nhắc' ở từng thuốc để đặt lịch!"
     }
 
-    fun deleteRecord(recordId: String) {
-        localStore.deleteRecord(recordId)
-        if (_activeRecordDetailId.value == recordId) {
-            _activeRecordDetailId.value = null
-        }
-        _snackbarMessage.value = "Đã xóa phiếu khám."
-        triggerAutoSyncIfReady()
-    }
-
     fun addReminderFromMedication(med: MedicationItem, record: MedicalRecord) {
         val cfg = settings.value
         val mappedTimes = med.daySlots.map { cfg.timeForSlot(it) }
