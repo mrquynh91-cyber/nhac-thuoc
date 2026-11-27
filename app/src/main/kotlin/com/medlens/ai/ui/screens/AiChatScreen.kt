@@ -237,13 +237,13 @@ fun AiChatScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Chào bạn! Mình là trợ lý Gemini AI của Hiểu Đơn.",
+                                text = "Chào bạn! Mình là Trợ lý Y khoa chuyên sâu Gemini AI.",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = TealDark
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "Bạn có thể hỏi kỹ hơn về đơn thuốc vừa quét, chỉ số xét nghiệm, tương tác thuốc, cách uống trước/sau ăn hoặc chế độ ăn uống cho hồ sơ ${activeProfile.name}.",
+                                text = "Hỏi bất kỳ câu hỏi nào về chuyên ngành y học: bệnh lý (viêm gan B, huyết áp, dạ dày, tiểu đường...), thuốc & phác đồ y văn chuẩn, chỉ số xét nghiệm, tương tác thuốc và dinh dưỡng cho hồ sơ ${activeProfile.name}.",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Spacer(Modifier.height(12.dp))
@@ -254,10 +254,10 @@ fun AiChatScreen(
                             )
                             Spacer(Modifier.height(6.dp))
                             val starters = listOf(
+                                "Bị virus viêm gan B khi nào cần uống thuốc và dùng nhóm thuốc nào?",
                                 "Các thuốc tôi đang đặt lịch có tương tác với nhau không?",
                                 "Men gan hoặc mỡ máu cao nên ăn và kiêng món gì cụ thể?",
-                                "Thuốc uống trước ăn và sau ăn nên cách nhau bao lâu?",
-                                "Uống thuốc chung với sữa hoặc trà có ảnh hưởng gì không?"
+                                "Chỉ số HbA1c bao nhiêu thì cần khám tiểu đường?"
                             )
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),

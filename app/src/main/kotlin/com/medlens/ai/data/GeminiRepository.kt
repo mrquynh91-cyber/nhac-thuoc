@@ -234,14 +234,17 @@ class GeminiRepository(
             }
 
             val systemText = """
-                Bạn là trợ lý y khoa tiếng Việt thân thiện, tận tâm trong ứng dụng "Hiểu Đơn" (MedRead VN).
-                Người dùng đang chat trực tiếp với bạn để hỏi kỹ hơn về sức khỏe, đơn thuốc, chỉ số xét nghiệm, tương tác thuốc hoặc chế độ ăn uống cho thành viên trong gia đình.
+                Bạn là Trợ lý Chuyên môn Y khoa & Dược lý tiếng Việt trong ứng dụng "Hiểu Đơn" (MedRead VN).
+                Nhiệm vụ của bạn là giải đáp TOÀN DIỆN, SÂU SẮC và DỄ HIỂU mọi câu hỏi thuộc chuyên ngành y học — bao gồm:
+                - Bệnh lý các chuyên khoa (Nội tổng quát, Gan mật - Truyền nhiễm như viêm gan B/C, Tim mạch, Nội tiết - Tiểu đường, Tiêu hóa - Dạ dày, Hô hấp, Thần kinh, Cơ xương khớp, Da liễu, Nhi khoa, Sản phụ khoa...).
+                - Dược lý & điều trị theo y văn chuẩn (giải thích rõ các nhóm thuốc / hoạt chất phổ biến bác sĩ thường chỉ định, cơ chế tác dụng, tiêu chí xét nghiệm để bắt đầu dùng thuốc, tương tác thuốc và tác dụng phụ thường gặp).
+                - Đọc hiểu mọi xét nghiệm cận lâm sàng, siêu âm, X-quang, CT/MRI, vắc-xin, chế độ dinh dưỡng bệnh lý và hướng dẫn chăm sóc / sơ cứu an toàn.
 
-                Nguyên tắc bắt buộc:
-                1. Trả lời bằng tiếng Việt đời thường, ấm áp, dễ hiểu, trình bày rõ ràng theo gạch đầu dòng ngắn gọn (không viết tường chữ dài).
-                2. Cá nhân hóa câu trả lời dựa trên hồ sơ, thuốc đang uống và phiếu khám bên dưới nếu có liên quan.
-                3. Không đưa ra chẩn đoán khẳng định bệnh và KHÔNG tự ý khuyên người dùng bỏ thuốc hoặc đổi liều bác sĩ đã kê.
-                4. Luôn nêu rõ dấu hiệu cần gặp bác sĩ/dược sĩ khi có rủi ro tương tác thuốc, dị ứng hoặc triệu chứng bất thường.
+                Nguyên tắc trả lời bắt buộc:
+                1. Luôn trả lời trực diện, đầy đủ kiến thức chuyên môn nhưng diễn đạt bằng tiếng Việt đời thường, rõ ràng theo từng ý gạch đầu dòng ngắn gọn (tránh trả lời chung chung kiểu né tránh).
+                2. Ví dụ khi người dùng hỏi "bị viêm gan B thì uống thuốc nào", hãy giải thích cụ thể: không phải ai mang virus cũng cần uống ngay; nêu rõ các thuốc kháng virus chuẩn hiện nay bác sĩ thường kê (như Tenofovir TDF/TAF, Entecavir), các xét nghiệm cần làm để quyết định điều trị (HBeAg, HBV-DNA, ALT, siêu âm/đo độ đàn hồi gan), và lưu ý uống đều không tự ngưng.
+                3. Kết hợp thông tin hồ sơ sức khỏe, thuốc đang uống và phiếu khám bên dưới nếu câu hỏi có liên quan trực tiếp đến người bệnh.
+                4. Đảm bảo an toàn y khoa: nêu rõ thông tin mang tính tham khảo y khoa, không thay thế đơn kê trực tiếp của bác sĩ chuyên khoa (đặc biệt với thuốc kê đơn như kháng sinh, kháng virus, tim mạch) và cảnh báo dấu hiệu cấp cứu cần đi viện ngay nếu có.
 
                 $profileSummary
                 Thuốc đang đặt lịch nhắc:
@@ -297,13 +300,22 @@ class GeminiRepository(
         val firstAttempt = postGenerateContent(primary, apiKey, requestJson)
         if (firstAttempt.isSuccess) return firstAttempt.body
 
-        // If 404 (model retired / unavailable for this API key), discover active models dynamically!
-        if (firstAttempt.code == 404) {
-            val discovered = discoverAvailableGeminiModels(apiKey)
+        val isRetriableOverload = firstAttempt.code == 503 || firstAttempt.code == 429 || firstAttempt.code == 500
+        val isModelNotFound = firstAttempt.code == 404
+
+        if (isModelNotFound || isRetriableOverload) {
+            // Brief retry on same model once for transient 503 spikes before failing over
+            if (isRetriableOverload) {
+                runCatching { Thread.sleep(500) }
+                val quickRetry = postGenerateContent(primary, apiKey, requestJson)
+                if (quickRetry.isSuccess) return quickRetry.body
+            }
+
+            val discovered = if (isModelNotFound) discoverAvailableGeminiModels(apiKey) else emptyList()
             val fallbackCandidates = (discovered + listOf(
                 "gemini-4-hydrogen",
-                "gemini-4-neon",
                 "gemini-3.8-flash",
+                "gemini-4-neon",
                 "gemini-3.5-flash-lite",
                 "gemini-4-argon",
                 "gemini-flash-latest"
@@ -316,11 +328,15 @@ class GeminiRepository(
             for (candidate in fallbackCandidates.take(5)) {
                 val retry = postGenerateContent(candidate, apiKey, requestJson)
                 if (retry.isSuccess) {
-                    onModelAutoSwitched?.invoke(candidate)
+                    // Only permanently switch saved model if the original returned 404;
+                    // on temporary 503/429 overload, keep the user's preferred model intact!
+                    if (isModelNotFound) {
+                        onModelAutoSwitched?.invoke(candidate)
+                    }
                     return retry.body
                 }
                 lastError = retry
-                if (retry.code != 404) break
+                if (retry.code != 404 && retry.code != 503 && retry.code != 429) break
             }
             throw IllegalStateException(parseGeminiError(lastError.code, lastError.body, lastError.model))
         }
@@ -646,6 +662,7 @@ class GeminiRepository(
             400, 401, 403 -> "Gemini API Key không hợp lệ hoặc chưa được cấp quyền ($code). ${serverMsg.orEmpty()}"
             404 -> "Model '$modelId' không khả dụng (404) kể cả sau khi tự thử đổi model. Chi tiết Google: ${serverMsg ?: body.take(180)}"
             429 -> "Gemini API đã vượt hạn mức tạm thời (429). Vui lòng thử lại sau ít phút."
+            503 -> "Máy chủ Gemini đang quá tải tạm thời (503) sau khi đã tự động chuyển model dự phòng. Bạn vui lòng bấm gửi lại sau vài giây nhé."
             else -> "Lỗi gọi Gemini API ($code - $modelId): ${serverMsg ?: body.take(200)}"
         }
     }
