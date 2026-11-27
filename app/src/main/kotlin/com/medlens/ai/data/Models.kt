@@ -229,7 +229,8 @@ data class LocalDatabaseSnapshot(
     val profiles: List<FamilyProfile> = emptyList(),
     val records: List<MedicalRecord> = emptyList(),
     val reminders: List<MedicationReminder> = emptyList(),
-    val intakeLogs: List<MedicationIntakeLog> = emptyList()
+    val intakeLogs: List<MedicationIntakeLog> = emptyList(),
+    val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap()
 )
 
 @Serializable
@@ -240,7 +241,8 @@ data class BackupBundle(
     val profiles: List<FamilyProfile> = emptyList(),
     val records: List<MedicalRecord> = emptyList(),
     val reminders: List<MedicationReminder> = emptyList(),
-    val intakeLogs: List<MedicationIntakeLog> = emptyList()
+    val intakeLogs: List<MedicationIntakeLog> = emptyList(),
+    val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap()
 )
 
 data class IndicatorTrendPoint(

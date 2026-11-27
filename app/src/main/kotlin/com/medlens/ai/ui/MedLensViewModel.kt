@@ -42,6 +42,7 @@ enum class MainTab(val label: String) {
     HOME("Trang chủ"),
     SCAN("Quét AI"),
     RECORDS("Sổ khám"),
+    AI_CHAT("Gemini AI"),
     SETTINGS("Cài đặt")
 }
 
@@ -108,6 +109,13 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         TrendAnalyzer.buildTrendSeries(profileRecords)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val activeProfileAssistantChat: StateFlow<List<RecordChatMessage>> = combine(
+        localStore.assistantChats,
+        activeProfile
+    ) { map, prof ->
+        map[prof.id].orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _selectedTab = MutableStateFlow(MainTab.HOME)
     val selectedTab: StateFlow<MainTab> = _selectedTab.asStateFlow()
 
@@ -127,6 +135,9 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isChatReplying = MutableStateFlow(false)
     val isChatReplying: StateFlow<Boolean> = _isChatReplying.asStateFlow()
+
+    private val _isAssistantReplying = MutableStateFlow(false)
+    val isAssistantReplying: StateFlow<Boolean> = _isAssistantReplying.asStateFlow()
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -264,6 +275,53 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    fun sendDirectAssistantMessage(question: String, focusedRecordId: String?) {
+        val clean = question.trim()
+        if (clean.isEmpty() || _isAssistantReplying.value) return
+
+        val profile = activeProfile.value
+        val previousHistory = activeProfileAssistantChat.value
+        val focusedRecord = focusedRecordId?.let { id -> activeProfileRecords.value.firstOrNull { it.id == id } }
+
+        localStore.appendAssistantMessages(profile.id, RecordChatMessage(isUser = true, text = clean))
+
+        viewModelScope.launch {
+            _isAssistantReplying.value = true
+            val cfg = settings.value
+            val result = geminiRepo.askDirectAssistantChat(
+                profile = profile,
+                recentRecords = activeProfileRecords.value,
+                activeReminders = activeProfileReminders.value.filter { it.isActive },
+                focusedRecord = focusedRecord,
+                chatHistory = previousHistory,
+                question = clean,
+                apiKey = cfg.geminiApiKey,
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            _isAssistantReplying.value = false
+            result.onSuccess { reply ->
+                localStore.appendAssistantMessages(profile.id, RecordChatMessage(isUser = false, text = reply))
+            }.onFailure { err ->
+                localStore.appendAssistantMessages(
+                    profile.id,
+                    RecordChatMessage(
+                        isUser = false,
+                        text = "Xin lỗi, mình chưa thể trả lời ngay lúc này: ${err.localizedMessage}"
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearDirectAssistantChat() {
+        val profile = activeProfile.value
+        localStore.clearAssistantChat(profile.id)
+        _snackbarMessage.value = "Đã bắt đầu cuộc trò chuyện mới cho ${profile.name}."
     }
 
     fun loadSampleLabWithTrend() {

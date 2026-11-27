@@ -173,6 +173,120 @@ class GeminiRepository(
         }
     }
 
+    suspend fun askDirectAssistantChat(
+        profile: FamilyProfile,
+        recentRecords: List<MedicalRecord>,
+        activeReminders: List<MedicationReminder>,
+        focusedRecord: MedicalRecord?,
+        chatHistory: List<RecordChatMessage>,
+        question: String,
+        apiKey: String,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val cleanQuestion = question.trim()
+        if (cleanQuestion.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Vui lòng nhập hoặc nói câu hỏi."))
+        }
+
+        val cleanKey = apiKey.replace(Regex("\\s+"), "")
+        if (cleanKey.isEmpty()) {
+            val fallback = if (focusedRecord != null) {
+                buildOfflineHelpfulReply(focusedRecord, profile, cleanQuestion)
+            } else {
+                "Mình đã nhận câu hỏi của bạn cho hồ sơ **${profile.name}**. Hiện chưa có Gemini API Key trong tab Cài đặt nên chưa thể kết nối Gemini AI trực tiếp.\n\nBạn hãy vào **Cài đặt → Tích hợp AI Gemini** để dán API Key miễn phí, sau đó quay lại đây hỏi chi tiết về đơn thuốc, chỉ số xét nghiệm, tương tác thuốc và chế độ ăn uống nhé!"
+            }
+            return@withContext Result.success(fallback)
+        }
+
+        runCatching {
+            val profileSummary = buildString {
+                appendLine("Hồ sơ đang trò chuyện: ${profile.name} (${profile.relationship})")
+                if (profile.birthYear.isNotBlank()) appendLine("- Năm sinh: ${profile.birthYear}")
+                if (profile.bloodType.isNotBlank() && profile.bloodType != "Chưa cập nhật") {
+                    appendLine("- Nhóm máu: ${profile.bloodType}")
+                }
+                appendLine("- Tiền sử dị ứng thuốc: ${profile.drugAllergies.ifBlank { "chưa ghi nhận" }}")
+                appendLine("- Bệnh nền: ${profile.chronicConditions.ifBlank { "chưa ghi nhận" }}")
+            }
+
+            val remindersText = if (activeReminders.isEmpty()) {
+                "Chưa có lịch thuốc đang uống."
+            } else {
+                activeReminders.joinToString("\n") { r ->
+                    "- ${r.medicationName} (${r.dosage}, ${r.mealTiming.labelVi}, giờ nhắc: ${r.times.joinToString(", ")})"
+                }
+            }
+
+            val contextData = if (focusedRecord != null) {
+                "Phiếu khám người dùng đang ghim để hỏi kỹ:\n" + json.encodeToString(
+                    focusedRecord.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
+                )
+            } else {
+                val briefRecords = recentRecords.take(3).joinToString("\n") { rec ->
+                    val labs = rec.labIndicators.take(8).joinToString("; ") { "${it.name}: ${it.value} ${it.unit} (${it.status.labelVi})" }
+                    val meds = rec.medications.joinToString("; ") { "${it.name} ${it.dosage} (${it.mealTiming.labelVi})" }
+                    "- [${rec.recordDate}] ${rec.title}: ${rec.overallSummary.take(180)}" +
+                        (if (labs.isNotBlank()) " | Chỉ số: $labs" else "") +
+                        (if (meds.isNotBlank()) " | Thuốc: $meds" else "")
+                }
+                if (briefRecords.isBlank()) "Chưa có phiếu khám nào được quét." else "Các phiếu khám gần nhất:\n$briefRecords"
+            }
+
+            val systemText = """
+                Bạn là trợ lý y khoa tiếng Việt thân thiện, tận tâm trong ứng dụng "Hiểu Đơn" (MedRead VN).
+                Người dùng đang chat trực tiếp với bạn để hỏi kỹ hơn về sức khỏe, đơn thuốc, chỉ số xét nghiệm, tương tác thuốc hoặc chế độ ăn uống cho thành viên trong gia đình.
+
+                Nguyên tắc bắt buộc:
+                1. Trả lời bằng tiếng Việt đời thường, ấm áp, dễ hiểu, trình bày rõ ràng theo gạch đầu dòng ngắn gọn (không viết tường chữ dài).
+                2. Cá nhân hóa câu trả lời dựa trên hồ sơ, thuốc đang uống và phiếu khám bên dưới nếu có liên quan.
+                3. Không đưa ra chẩn đoán khẳng định bệnh và KHÔNG tự ý khuyên người dùng bỏ thuốc hoặc đổi liều bác sĩ đã kê.
+                4. Luôn nêu rõ dấu hiệu cần gặp bác sĩ/dược sĩ khi có rủi ro tương tác thuốc, dị ứng hoặc triệu chứng bất thường.
+
+                $profileSummary
+                Thuốc đang đặt lịch nhắc:
+                $remindersText
+
+                $contextData
+            """.trimIndent()
+
+            val root = buildJsonObject {
+                put("system_instruction", buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemText) })
+                    })
+                })
+                put("contents", buildJsonArray {
+                    chatHistory.takeLast(12).forEach { msg ->
+                        add(buildJsonObject {
+                            put("role", if (msg.isUser) "user" else "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject { put("text", msg.text) })
+                            })
+                        })
+                    }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject { put("text", cleanQuestion) })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.35)
+                })
+            }
+
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                apiKey = cleanKey,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            extractCandidateText(responseBody)
+        }
+    }
+
     private fun executeGenerateContentWithAutoFallback(
         preferredModel: String,
         apiKey: String,

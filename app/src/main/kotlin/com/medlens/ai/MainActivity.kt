@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Home
@@ -32,6 +33,7 @@ import com.medlens.ai.data.IntakeStatus
 import com.medlens.ai.ui.MainTab
 import com.medlens.ai.ui.MedLensViewModel
 import com.medlens.ai.ui.components.RecordDetailScreen
+import com.medlens.ai.ui.screens.AiChatScreen
 import com.medlens.ai.ui.screens.FamilyRecordsScreen
 import com.medlens.ai.ui.screens.HomeScreen
 import com.medlens.ai.ui.screens.ScanScreen
@@ -62,6 +64,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val activeReminders by vm.activeProfileReminders.collectAsState()
     val activeTodayDoses by vm.activeProfileTodayDoses.collectAsState()
     val activeTrends by vm.activeProfileTrends.collectAsState()
+    val activeAssistantChat by vm.activeProfileAssistantChat.collectAsState()
     val settings by vm.settings.collectAsState()
     val cloudSyncState by vm.cloudSyncState.collectAsState()
     val otaState by vm.otaState.collectAsState()
@@ -69,6 +72,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val isAnalyzing by vm.isAnalyzing.collectAsState()
     val analysisError by vm.analysisError.collectAsState()
     val isChatReplying by vm.isChatReplying.collectAsState()
+    val isAssistantReplying by vm.isAssistantReplying.collectAsState()
     val snackbarMsg by vm.snackbarMessage.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -113,13 +117,21 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                         MainTab.HOME -> Icons.Default.Home
                         MainTab.SCAN -> Icons.Default.CameraAlt
                         MainTab.RECORDS -> Icons.Default.FolderShared
+                        MainTab.AI_CHAT -> Icons.Default.AutoAwesome
                         MainTab.SETTINGS -> Icons.Default.Settings
                     }
                     NavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = { vm.selectTab(tab) },
                         icon = { Icon(icon, contentDescription = tab.label) },
-                        label = { Text(tab.label, maxLines = 1) }
+                        label = {
+                            Text(
+                                text = tab.label,
+                                maxLines = 1,
+                                softWrap = false,
+                                style = androidx.compose.material3.MaterialTheme.typography.labelSmall
+                            )
+                        }
                     )
                 }
             }
@@ -169,6 +181,19 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     onSaveBhytImage = { prof, uri -> vm.saveBhytImage(prof, uri) },
                     onOpenRecord = { vm.openRecordDetail(it) },
                     onLoadSampleLabWithTrend = { vm.loadSampleLabWithTrend() }
+                )
+
+                MainTab.AI_CHAT -> AiChatScreen(
+                    activeProfile = activeProfile,
+                    profileRecords = activeRecords,
+                    messages = activeAssistantChat,
+                    geminiModel = settings.geminiModel,
+                    hasGeminiApiKey = settings.geminiApiKey.isNotBlank(),
+                    isReplying = isAssistantReplying,
+                    onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
+                    onClearChat = { vm.clearDirectAssistantChat() },
+                    onGoToSettings = { vm.selectTab(MainTab.SETTINGS) },
+                    onShowMessage = { vm.showMessage(it) }
                 )
 
                 MainTab.SETTINGS -> SyncAndOtaScreen(

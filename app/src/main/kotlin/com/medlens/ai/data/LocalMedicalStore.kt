@@ -39,6 +39,9 @@ class LocalMedicalStore(private val context: Context) {
     private val _intakeLogs = MutableStateFlow<List<MedicationIntakeLog>>(emptyList())
     val intakeLogs: StateFlow<List<MedicationIntakeLog>> = _intakeLogs.asStateFlow()
 
+    private val _assistantChats = MutableStateFlow<Map<String, List<RecordChatMessage>>>(emptyMap())
+    val assistantChats: StateFlow<Map<String, List<RecordChatMessage>>> = _assistantChats.asStateFlow()
+
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -59,6 +62,7 @@ class LocalMedicalStore(private val context: Context) {
                 _records.value = snapshot.records.sortedByDescending { it.createdAt }
                 _reminders.value = snapshot.reminders.sortedByDescending { it.createdAt }
                 _intakeLogs.value = snapshot.intakeLogs.sortedByDescending { it.loggedAt }
+                _assistantChats.value = snapshot.assistantChats
             }
         }
     }
@@ -69,7 +73,8 @@ class LocalMedicalStore(private val context: Context) {
                 profiles = _profiles.value,
                 records = _records.value,
                 reminders = _reminders.value,
-                intakeLogs = _intakeLogs.value
+                intakeLogs = _intakeLogs.value,
+                assistantChats = _assistantChats.value
             )
             val tmpFile = File(context.filesDir, "medlens_local_db.json.tmp")
             tmpFile.writeText(json.encodeToString(snapshot))
@@ -175,6 +180,25 @@ class LocalMedicalStore(private val context: Context) {
             )
             upsertRecord(updated)
             return updated
+        }
+    }
+
+    fun appendAssistantMessages(profileId: String, vararg messages: RecordChatMessage) {
+        synchronized(lock) {
+            val currentMap = _assistantChats.value.toMutableMap()
+            val updated = (currentMap[profileId].orEmpty() + messages).takeLast(60)
+            currentMap[profileId] = updated
+            _assistantChats.value = currentMap
+            persistToDisk()
+        }
+    }
+
+    fun clearAssistantChat(profileId: String) {
+        synchronized(lock) {
+            val currentMap = _assistantChats.value.toMutableMap()
+            currentMap.remove(profileId)
+            _assistantChats.value = currentMap
+            persistToDisk()
         }
     }
 
