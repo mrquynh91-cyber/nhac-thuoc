@@ -307,8 +307,8 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
             sourceRecordId = record.id,
             isActive = true
         )
-        saveReminder(reminder)
-        _snackbarMessage.value = "Đã tạo lịch nhắc cho ${med.name}"
+        saveReminder(reminder, notifyUser = false)
+        _snackbarMessage.value = "✅ Đã thêm lịch nhắc uống thuốc: ${med.name} (${reminder.times.joinToString(", ")})"
     }
 
     fun addAllRemindersFromRecord(record: MedicalRecord) {
@@ -332,23 +332,27 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
             localStore.upsertReminder(reminder)
             scheduler.scheduleReminder(reminder)
         }
-        _snackbarMessage.value = "Đã đẩy toàn bộ ${record.medications.size} thuốc sang lịch nhắc uống thuốc!"
+        _snackbarMessage.value = "✅ Đã tạo thành công ${record.medications.size} lịch nhắc uống thuốc!"
         triggerAutoSyncIfReady()
     }
 
-    fun saveReminder(reminder: MedicationReminder) {
+    fun saveReminder(reminder: MedicationReminder, notifyUser: Boolean = true) {
         localStore.upsertReminder(reminder)
         if (reminder.isActive) {
             scheduler.scheduleReminder(reminder)
         } else {
             scheduler.cancelReminder(reminder)
         }
+        if (notifyUser) {
+            _snackbarMessage.value =
+                "✅ Đã lưu lịch nhắc uống thuốc: ${reminder.medicationName} (${reminder.times.joinToString(", ")})"
+        }
         triggerAutoSyncIfReady()
     }
 
     fun toggleReminderActive(reminder: MedicationReminder) {
         val updated = reminder.copy(isActive = !reminder.isActive)
-        saveReminder(updated)
+        saveReminder(updated, notifyUser = false)
         _snackbarMessage.value = if (updated.isActive) {
             "Đã bật lịch nhắc ${updated.medicationName}"
         } else {

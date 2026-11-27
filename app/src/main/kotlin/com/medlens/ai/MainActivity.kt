@@ -76,6 +76,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     LaunchedEffect(snackbarMsg) {
         val msg = snackbarMsg
         if (!msg.isNullOrBlank()) {
+            snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(msg)
             vm.consumeSnackbar()
         }
@@ -86,6 +87,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
         RecordDetailScreen(
             record = record,
             isChatReplying = isChatReplying,
+            snackbarHostState = snackbarHostState,
             onBack = { vm.closeRecordDetail() },
             onDelete = { vm.deleteRecord(record.id) },
             onAddMedicationReminder = { med ->

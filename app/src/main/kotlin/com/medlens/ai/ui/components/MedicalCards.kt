@@ -56,6 +56,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -436,6 +438,7 @@ fun MedicalDisclaimerCard(disclaimer: String) {
 fun RecordDetailScreen(
     record: MedicalRecord,
     isChatReplying: Boolean,
+    snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onDelete: () -> Unit,
     onAddMedicationReminder: (MedicationItem) -> Unit,
@@ -473,6 +476,7 @@ fun RecordDetailScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
