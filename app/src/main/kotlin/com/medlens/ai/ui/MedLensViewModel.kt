@@ -440,6 +440,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
             _activeRecordDetailId.value = null
         }
         _snackbarMessage.value = "Đã xóa phiếu khám."
+        triggerAutoSyncIfReady()
     }
 
     fun addReminderFromMedication(med: MedicationItem, record: MedicalRecord) {
@@ -520,6 +521,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         localStore.deleteReminder(reminder.id)
         scheduler.rescheduleAll(localStore.reminders.value)
         _snackbarMessage.value = "Đã xóa lịch nhắc ${reminder.medicationName}"
+        triggerAutoSyncIfReady()
     }
 
     fun markDoseStatus(dose: ScheduledDoseItem, status: IntakeStatus) {
@@ -738,9 +740,13 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
     private fun triggerAutoSyncIfReady() {
         val cfg = settings.value
         val sync = cloudSyncState.value
-        if (cfg.autoSyncEnabled && sync.isFirebaseConfigured && sync.user != null && !sync.isSyncing) {
-            viewModelScope.launch {
-                firebaseRepo.syncNow()
+        if (cfg.autoSyncEnabled && sync.isFirebaseConfigured && sync.user != null) {
+            if (sync.isSyncing) {
+                firebaseRepo.requestFollowUpSync()
+            } else {
+                viewModelScope.launch {
+                    firebaseRepo.syncNow()
+                }
             }
         }
     }

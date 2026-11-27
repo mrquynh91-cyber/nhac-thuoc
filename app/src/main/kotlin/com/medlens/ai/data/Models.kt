@@ -238,7 +238,10 @@ data class LocalDatabaseSnapshot(
     val records: List<MedicalRecord> = emptyList(),
     val reminders: List<MedicationReminder> = emptyList(),
     val intakeLogs: List<MedicationIntakeLog> = emptyList(),
-    val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap()
+    val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap(),
+    val deletedProfileIds: Map<String, Long> = emptyMap(),
+    val deletedRecordIds: Map<String, Long> = emptyMap(),
+    val deletedReminderIds: Map<String, Long> = emptyMap()
 )
 
 @Serializable

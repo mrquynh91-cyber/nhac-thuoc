@@ -42,6 +42,10 @@ class LocalMedicalStore(private val context: Context) {
     private val _assistantChats = MutableStateFlow<Map<String, List<RecordChatMessage>>>(emptyMap())
     val assistantChats: StateFlow<Map<String, List<RecordChatMessage>>> = _assistantChats.asStateFlow()
 
+    private val deletedProfileIds = mutableMapOf<String, Long>()
+    private val deletedRecordIds = mutableMapOf<String, Long>()
+    private val deletedReminderIds = mutableMapOf<String, Long>()
+
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -58,13 +62,22 @@ class LocalMedicalStore(private val context: Context) {
             runCatching {
                 val raw = dbFile.readText()
                 val snapshot = json.decodeFromString<LocalDatabaseSnapshot>(raw)
+                deletedProfileIds.clear()
+                deletedProfileIds.putAll(snapshot.deletedProfileIds)
+                deletedRecordIds.clear()
+                deletedRecordIds.putAll(snapshot.deletedRecordIds)
+                deletedReminderIds.clear()
+                deletedReminderIds.putAll(snapshot.deletedReminderIds)
+
                 _profiles.value = snapshot.profiles.ifEmpty { FamilyProfile.defaultProfiles() }
                 _records.value = snapshot.records.sortedByDescending { it.createdAt }
-                val dedupedReminders = deduplicateReminders(snapshot.reminders)
+                val (dedupedReminders, droppedIds) = deduplicateReminders(snapshot.reminders)
+                val now = System.currentTimeMillis()
+                droppedIds.forEach { deletedReminderIds[it] = now }
                 _reminders.value = dedupedReminders
                 _intakeLogs.value = snapshot.intakeLogs.sortedByDescending { it.loggedAt }
                 _assistantChats.value = snapshot.assistantChats
-                if (dedupedReminders.size != snapshot.reminders.size) {
+                if (droppedIds.isNotEmpty()) {
                     persistToDisk()
                 }
             }
@@ -78,7 +91,10 @@ class LocalMedicalStore(private val context: Context) {
                 records = _records.value,
                 reminders = _reminders.value,
                 intakeLogs = _intakeLogs.value,
-                assistantChats = _assistantChats.value
+                assistantChats = _assistantChats.value,
+                deletedProfileIds = deletedProfileIds.toMap(),
+                deletedRecordIds = deletedRecordIds.toMap(),
+                deletedReminderIds = deletedReminderIds.toMap()
             )
             val tmpFile = File(context.filesDir, "medlens_local_db.json.tmp")
             tmpFile.writeText(json.encodeToString(snapshot))
@@ -146,6 +162,7 @@ class LocalMedicalStore(private val context: Context) {
 
     fun upsertProfile(profile: FamilyProfile) {
         synchronized(lock) {
+            deletedProfileIds.remove(profile.id)
             val stamped = profile.copy(updatedAt = maxOf(profile.updatedAt, System.currentTimeMillis()))
             val existingIndex = _profiles.value.indexOfFirst { it.id == stamped.id }
             val updated = _profiles.value.toMutableList()
@@ -162,6 +179,7 @@ class LocalMedicalStore(private val context: Context) {
     fun deleteProfile(profileId: String) {
         synchronized(lock) {
             if (_profiles.value.size <= 1) return
+            deletedProfileIds[profileId] = System.currentTimeMillis()
             _profiles.value = _profiles.value.filterNot { it.id == profileId }
             if (_settings.value.activeProfileId == profileId) {
                 updateSettings { it.copy(activeProfileId = _profiles.value.first().id) }
@@ -172,6 +190,7 @@ class LocalMedicalStore(private val context: Context) {
 
     fun upsertRecord(record: MedicalRecord) {
         synchronized(lock) {
+            deletedRecordIds.remove(record.id)
             val now = System.currentTimeMillis()
             val stamped = record.copy(updatedAt = maxOf(record.updatedAt, now))
             val mutable = _records.value.filterNot { it.id == stamped.id }.toMutableList()
@@ -214,6 +233,7 @@ class LocalMedicalStore(private val context: Context) {
 
     fun deleteRecord(recordId: String) {
         synchronized(lock) {
+            deletedRecordIds[recordId] = System.currentTimeMillis()
             _records.value = _records.value.filterNot { it.id == recordId }
             persistToDisk()
         }
@@ -235,6 +255,8 @@ class LocalMedicalStore(private val context: Context) {
                 reminder.id.isNotBlank() -> reminder.id
                 else -> java.util.UUID.randomUUID().toString()
             }
+            deletedReminderIds.remove(resolvedId)
+
             val stamped = reminder.copy(
                 id = resolvedId,
                 medicationName = cleanName,
@@ -242,6 +264,12 @@ class LocalMedicalStore(private val context: Context) {
                 createdAt = matched?.createdAt ?: reminder.createdAt,
                 updatedAt = maxOf(reminder.updatedAt, now)
             )
+            // Record any duplicate reminder IDs that are collapsed by this upsert so cloud deletes them too
+            _reminders.value.forEach { old ->
+                if (old.id != stamped.id && normalizedMedicationKey(old.profileId, old.medicationName) == targetKey) {
+                    deletedReminderIds[old.id] = now
+                }
+            }
             val mutable = _reminders.value
                 .filterNot {
                     it.id == stamped.id ||
@@ -254,25 +282,71 @@ class LocalMedicalStore(private val context: Context) {
         }
     }
 
-    private fun deduplicateReminders(list: List<MedicationReminder>): List<MedicationReminder> {
-        return list
-            .groupBy { normalizedMedicationKey(it.profileId, it.medicationName) }
+    private fun deduplicateReminders(list: List<MedicationReminder>): Pair<List<MedicationReminder>, List<String>> {
+        val kept = mutableListOf<MedicationReminder>()
+        val droppedIds = mutableListOf<String>()
+        list.groupBy { normalizedMedicationKey(it.profileId, it.medicationName) }
             .values
-            .mapNotNull { group ->
-                group.maxByOrNull { maxOf(it.updatedAt, it.createdAt) }?.let { winner ->
-                    winner.copy(
-                        medicationName = winner.medicationName.trim(),
-                        times = winner.times.distinct().sorted()
+            .forEach { group ->
+                val winner = group.maxByOrNull { maxOf(it.updatedAt, it.createdAt) }
+                if (winner != null) {
+                    kept.add(
+                        winner.copy(
+                            medicationName = winner.medicationName.trim(),
+                            times = winner.times.distinct().sorted()
+                        )
                     )
+                    group.forEach { item ->
+                        if (item.id != winner.id) {
+                            droppedIds.add(item.id)
+                        }
+                    }
                 }
             }
-            .sortedByDescending { it.createdAt }
+        return kept.sortedByDescending { it.createdAt } to droppedIds
     }
 
     fun deleteReminder(reminderId: String) {
         synchronized(lock) {
+            deletedReminderIds[reminderId] = System.currentTimeMillis()
             _reminders.value = _reminders.value.filterNot { it.id == reminderId }
             persistToDisk()
+        }
+    }
+
+    fun getPendingDeletes(): PendingDeletes = synchronized(lock) {
+        PendingDeletes(
+            profileIds = deletedProfileIds.toMap(),
+            recordIds = deletedRecordIds.toMap(),
+            reminderIds = deletedReminderIds.toMap()
+        )
+    }
+
+    fun confirmRemoteDeletes(confirmed: PendingDeletes) {
+        synchronized(lock) {
+            var changed = false
+            confirmed.profileIds.forEach { (id, ts) ->
+                val current = deletedProfileIds[id]
+                if (current != null && current <= ts) {
+                    deletedProfileIds.remove(id)
+                    changed = true
+                }
+            }
+            confirmed.recordIds.forEach { (id, ts) ->
+                val current = deletedRecordIds[id]
+                if (current != null && current <= ts) {
+                    deletedRecordIds.remove(id)
+                    changed = true
+                }
+            }
+            confirmed.reminderIds.forEach { (id, ts) ->
+                val current = deletedReminderIds[id]
+                if (current != null && current <= ts) {
+                    deletedReminderIds.remove(id)
+                    changed = true
+                }
+            }
+            if (changed) persistToDisk()
         }
     }
 
@@ -311,11 +385,19 @@ class LocalMedicalStore(private val context: Context) {
         remoteProfiles: List<FamilyProfile> = emptyList(),
         remoteRecords: List<MedicalRecord>,
         remoteReminders: List<MedicationReminder>,
-        remoteLogs: List<MedicationIntakeLog>
+        remoteLogs: List<MedicationIntakeLog>,
+        clearMatchingTombstones: Boolean = false
     ): MergeStats {
         synchronized(lock) {
+            if (clearMatchingTombstones) {
+                remoteProfiles.forEach { deletedProfileIds.remove(it.id) }
+                remoteRecords.forEach { deletedRecordIds.remove(it.id) }
+                remoteReminders.forEach { deletedReminderIds.remove(it.id) }
+            }
+
             val profileMap = _profiles.value.associateBy { it.id }.toMutableMap()
             for (remote in remoteProfiles) {
+                if (deletedProfileIds.containsKey(remote.id)) continue
                 val local = profileMap[remote.id]
                 if (local == null || remote.updatedAt > local.updatedAt) {
                     profileMap[remote.id] = remote.copy(
@@ -327,6 +409,7 @@ class LocalMedicalStore(private val context: Context) {
             val recordMap = _records.value.associateBy { it.id }.toMutableMap()
             var addedOrUpdatedRecords = 0
             for (remote in remoteRecords) {
+                if (deletedRecordIds.containsKey(remote.id)) continue
                 val local = recordMap[remote.id]
                 if (local == null || remote.updatedAt > local.updatedAt) {
                     recordMap[remote.id] = remote.copy(
@@ -341,6 +424,7 @@ class LocalMedicalStore(private val context: Context) {
             val reminderMap = _reminders.value.associateBy { it.id }.toMutableMap()
             var addedOrUpdatedReminders = 0
             for (remote in remoteReminders) {
+                if (deletedReminderIds.containsKey(remote.id)) continue
                 val local = reminderMap[remote.id]
                 if (local == null || remote.updatedAt > local.updatedAt) {
                     reminderMap[remote.id] = remote
@@ -348,9 +432,14 @@ class LocalMedicalStore(private val context: Context) {
                 }
             }
 
+            val (dedupedReminders, droppedDuplicateIds) = deduplicateReminders(reminderMap.values.toList())
+            val now = System.currentTimeMillis()
+            droppedDuplicateIds.forEach { deletedReminderIds[it] = now }
+
             val logMap = _intakeLogs.value.associateBy { it.id }.toMutableMap()
             var addedOrUpdatedLogs = 0
             for (remote in remoteLogs) {
+                if (deletedReminderIds.containsKey(remote.reminderId)) continue
                 val local = logMap[remote.id]
                 if (local == null || remote.loggedAt > local.loggedAt) {
                     logMap[remote.id] = remote
@@ -360,7 +449,7 @@ class LocalMedicalStore(private val context: Context) {
 
             _profiles.value = profileMap.values.toList().ifEmpty { FamilyProfile.defaultProfiles() }
             _records.value = recordMap.values.sortedByDescending { it.createdAt }
-            _reminders.value = deduplicateReminders(reminderMap.values.toList())
+            _reminders.value = dedupedReminders
             _intakeLogs.value = logMap.values.sortedByDescending { it.loggedAt }
             persistToDisk()
 
@@ -391,7 +480,8 @@ class LocalMedicalStore(private val context: Context) {
             remoteProfiles = bundle.profiles,
             remoteRecords = bundle.records,
             remoteReminders = bundle.reminders,
-            remoteLogs = bundle.intakeLogs
+            remoteLogs = bundle.intakeLogs,
+            clearMatchingTombstones = true
         )
     }
 
@@ -418,6 +508,15 @@ class LocalMedicalStore(private val context: Context) {
             return "$profileId::$cleanName"
         }
     }
+}
+
+data class PendingDeletes(
+    val profileIds: Map<String, Long> = emptyMap(),
+    val recordIds: Map<String, Long> = emptyMap(),
+    val reminderIds: Map<String, Long> = emptyMap()
+) {
+    val isEmpty: Boolean
+        get() = profileIds.isEmpty() && recordIds.isEmpty() && reminderIds.isEmpty()
 }
 
 data class MergeStats(
