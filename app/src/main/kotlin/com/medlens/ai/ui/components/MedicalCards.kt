@@ -33,9 +33,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlarmAdd
+import androidx.compose.material.icons.filled.AlarmOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
@@ -101,6 +103,7 @@ import com.medlens.ai.data.AppSettings
 import com.medlens.ai.data.DaySlot
 import com.medlens.ai.data.IndicatorStatus
 import com.medlens.ai.data.LabIndicator
+import com.medlens.ai.data.LocalMedicalStore
 import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.data.MedicationItem
 import com.medlens.ai.data.MedicationReminder
@@ -233,7 +236,8 @@ fun LabIndicatorCard(indicator: LabIndicator) {
 @Composable
 fun MedicationCard(
     medication: MedicationItem,
-    onCreateReminder: () -> Unit
+    existingReminder: MedicationReminder?,
+    onCreateOrEditReminder: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -293,7 +297,7 @@ fun MedicationCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 InfoChip(text = "Liều: ${medication.dosage}")
-                InfoChip(text = medication.mealTiming.labelVi)
+                InfoChip(text = existingReminder?.mealTiming?.labelVi ?: medication.mealTiming.labelVi)
                 if (medication.daySlots.isNotEmpty()) {
                     InfoChip(text = "Buổi: ${medication.daySlots.joinToString(" • ") { it.labelVi }}")
                 }
@@ -333,24 +337,76 @@ fun MedicationCard(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
+            val scheduledTimesText = existingReminder?.times
+                ?.takeIf { it.isNotEmpty() }
+                ?.joinToString(", ")
+            val suggestedTimesText = medication.suggestedReminderTimes
+                .ifEmpty { listOf("08:00") }
+                .joinToString(", ")
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (existingReminder != null) NormalGreenBg.copy(alpha = 0.55f)
+                        else TealLightContainer.copy(alpha = 0.45f)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Giờ nhắc: ${medication.suggestedReminderTimes.joinToString(", ")}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MutedText
-                )
-                FilledTonalButton(
-                    onClick = onCreateReminder,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Icon(Icons.Default.AlarmAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Chọn giờ & Nhắc")
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (existingReminder != null) Icons.Default.AlarmOn else Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = if (existingReminder != null) NormalGreen else TealPrimary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = if (existingReminder != null) {
+                                if (existingReminder.isActive) "Đã đặt nhắc: $scheduledTimesText"
+                                else "Đang tắt: $scheduledTimesText"
+                            } else {
+                                "Giờ nhắc: $suggestedTimesText"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (existingReminder != null) NormalGreen else TealDark
+                        )
+                    }
+                    Text(
+                        text = if (existingReminder != null) {
+                            "${existingReminder.dosage} • ${existingReminder.mealTiming.labelVi}"
+                        } else {
+                            "Bấm để chọn giờ uống (9h, 10h...)"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MutedText
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                if (existingReminder != null) {
+                    FilledTonalButton(
+                        onClick = onCreateOrEditReminder,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Sửa giờ")
+                    }
+                } else {
+                    Button(
+                        onClick = onCreateOrEditReminder,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.AlarmAdd, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Chọn giờ & Nhắc", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -358,7 +414,11 @@ fun MedicationCard(
 }
 
 @Composable
-private fun VisualPrescriptionScheduleCard(medications: List<MedicationItem>) {
+private fun VisualPrescriptionScheduleCard(
+    medications: List<MedicationItem>,
+    reminderByMedKey: Map<String, MedicationReminder>,
+    profileId: String
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -402,8 +462,13 @@ private fun VisualPrescriptionScheduleCard(medications: List<MedicationItem>) {
                         Spacer(Modifier.width(10.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             medsInSlot.forEach { med ->
+                                val saved = reminderByMedKey[LocalMedicalStore.normalizedMedicationKey(profileId, med.name)]
+                                val timeText = saved?.times?.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                                    ?: med.suggestedReminderTimes.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                                val timingLabel = saved?.mealTiming?.labelVi ?: med.mealTiming.labelVi
+                                val suffix = listOfNotNull(timeText, timingLabel).joinToString(" • ")
                                 Text(
-                                    text = "• ${med.name} (${med.dosage}) — ${med.mealTiming.labelVi}",
+                                    text = "• ${med.name} (${med.dosage}) — $suffix",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -461,13 +526,13 @@ fun MedicalDisclaimerCard(disclaimer: String) {
 @Composable
 fun RecordDetailScreen(
     record: MedicalRecord,
+    existingReminders: List<MedicationReminder>,
     settings: AppSettings,
     isChatReplying: Boolean,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onDelete: () -> Unit,
     onSaveCustomReminder: (MedicationReminder) -> Unit,
-    onAddAllReminders: () -> Unit,
     onSendChatQuestion: (String) -> Unit,
     onSendChatVoice: (File) -> Unit,
     onShowMessage: (String) -> Unit
@@ -479,7 +544,13 @@ fun RecordDetailScreen(
 
     var showNormalIndicators by remember(record.id) { mutableStateOf(false) }
     var chatInput by remember { mutableStateOf("") }
-    var pendingMedForTimePicker by remember { mutableStateOf<MedicationItem?>(null) }
+    var pendingReminderForDialog by remember { mutableStateOf<MedicationReminder?>(null) }
+
+    val reminderByMedKey = remember(existingReminders, record.profileId) {
+        existingReminders
+            .filter { it.profileId == record.profileId }
+            .associateBy { LocalMedicalStore.normalizedMedicationKey(it.profileId, it.medicationName) }
+    }
 
     // Dedicated compact in-app voice recorder (replaces full-screen Google Speech popup)
     val voiceRecorder = remember(context) { InAppVoiceRecorder(context) }
@@ -843,38 +914,51 @@ fun RecordDetailScreen(
                 }
             }
 
-            // Prescription Section + Visual Morning/Noon/Afternoon/Evening Schedule + 1-Tap Reminder
+            // Prescription Section: Visual Overview + Unified Per-Medication Reminder Control
             if (record.medications.isNotEmpty()) {
                 item {
-                    VisualPrescriptionScheduleCard(medications = record.medications)
-                }
-
-                item {
-                    Button(
-                        onClick = onAddAllReminders,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 12.dp)
-                    ) {
-                        Icon(Icons.Default.AlarmAdd, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Tạo lịch nhắc uống toàn bộ ${record.medications.size} thuốc (1 chạm)",
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    VisualPrescriptionScheduleCard(
+                        medications = record.medications,
+                        reminderByMedKey = reminderByMedKey,
+                        profileId = record.profileId
+                    )
                 }
 
                 item {
                     Text(
-                        text = "Chi tiết từng loại thuốc",
+                        text = "Chi tiết từng loại thuốc & Lịch nhắc uống",
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
 
                 items(record.medications) { med ->
+                    val existing = reminderByMedKey[
+                        LocalMedicalStore.normalizedMedicationKey(record.profileId, med.name)
+                    ]
                     MedicationCard(
                         medication = med,
-                        onCreateReminder = { pendingMedForTimePicker = med }
+                        existingReminder = existing,
+                        onCreateOrEditReminder = {
+                            if (existing != null) {
+                                pendingReminderForDialog = existing
+                            } else {
+                                val defaultNote = listOf(med.sideEffectsWarning, med.categoryShort)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" • ")
+                                    .ifBlank { med.purposePlainVietnamese.take(120) }
+                                pendingReminderForDialog = MedicationReminder(
+                                    id = "",
+                                    profileId = record.profileId,
+                                    medicationName = med.name,
+                                    dosage = med.dosage.ifBlank { "Theo đơn" },
+                                    mealTiming = med.mealTiming,
+                                    times = med.suggestedReminderTimes.ifEmpty { listOf("09:00") },
+                                    note = defaultNote,
+                                    sourceRecordId = record.id,
+                                    isActive = true
+                                )
+                            }
+                        }
                     )
                 }
             }
@@ -1062,35 +1146,20 @@ fun RecordDetailScreen(
         }
     }
 
-    pendingMedForTimePicker?.let { med ->
-        val defaultNote = listOf(med.sideEffectsWarning, med.categoryShort)
-            .filter { it.isNotBlank() }
-            .joinToString(" • ")
-            .ifBlank { med.purposePlainVietnamese.take(120) }
-        val prefilled = MedicationReminder(
-            id = "",
-            profileId = record.profileId,
-            medicationName = med.name,
-            dosage = med.dosage.ifBlank { "Theo đơn" },
-            mealTiming = med.mealTiming,
-            times = med.suggestedReminderTimes.ifEmpty { listOf("09:00") },
-            note = defaultNote,
-            sourceRecordId = record.id,
-            isActive = true
-        )
+    pendingReminderForDialog?.let { initialReminder ->
         AddEditMedicationReminderDialog(
             profileId = record.profileId,
-            initial = prefilled,
+            initial = initialReminder,
             defaultTimes = listOf(
                 settings.morningTime,
                 settings.noonTime,
                 settings.afternoonTime,
                 settings.eveningTime
             ),
-            onDismiss = { pendingMedForTimePicker = null },
+            onDismiss = { pendingReminderForDialog = null },
             onSave = { saved ->
                 onSaveCustomReminder(saved)
-                pendingMedForTimePicker = null
+                pendingReminderForDialog = null
             }
         )
     }

@@ -60,9 +60,13 @@ class LocalMedicalStore(private val context: Context) {
                 val snapshot = json.decodeFromString<LocalDatabaseSnapshot>(raw)
                 _profiles.value = snapshot.profiles.ifEmpty { FamilyProfile.defaultProfiles() }
                 _records.value = snapshot.records.sortedByDescending { it.createdAt }
-                _reminders.value = snapshot.reminders.sortedByDescending { it.createdAt }
+                val dedupedReminders = deduplicateReminders(snapshot.reminders)
+                _reminders.value = dedupedReminders
                 _intakeLogs.value = snapshot.intakeLogs.sortedByDescending { it.loggedAt }
                 _assistantChats.value = snapshot.assistantChats
+                if (dedupedReminders.size != snapshot.reminders.size) {
+                    persistToDisk()
+                }
             }
         }
     }
@@ -218,15 +222,51 @@ class LocalMedicalStore(private val context: Context) {
     fun upsertReminder(reminder: MedicationReminder) {
         synchronized(lock) {
             val now = System.currentTimeMillis()
+            val cleanName = reminder.medicationName.trim()
+            val targetKey = normalizedMedicationKey(reminder.profileId, cleanName)
+            val existingById = _reminders.value.firstOrNull { it.id == reminder.id && reminder.id.isNotBlank() }
+            val existingByName = _reminders.value.firstOrNull {
+                normalizedMedicationKey(it.profileId, it.medicationName) == targetKey
+            }
+            val matched = existingById ?: existingByName
+
+            val resolvedId = when {
+                matched != null -> matched.id
+                reminder.id.isNotBlank() -> reminder.id
+                else -> java.util.UUID.randomUUID().toString()
+            }
             val stamped = reminder.copy(
+                id = resolvedId,
+                medicationName = cleanName,
                 times = reminder.times.distinct().sorted(),
+                createdAt = matched?.createdAt ?: reminder.createdAt,
                 updatedAt = maxOf(reminder.updatedAt, now)
             )
-            val mutable = _reminders.value.filterNot { it.id == stamped.id }.toMutableList()
+            val mutable = _reminders.value
+                .filterNot {
+                    it.id == stamped.id ||
+                        normalizedMedicationKey(it.profileId, it.medicationName) == targetKey
+                }
+                .toMutableList()
             mutable.add(stamped)
             _reminders.value = mutable.sortedByDescending { it.createdAt }
             persistToDisk()
         }
+    }
+
+    private fun deduplicateReminders(list: List<MedicationReminder>): List<MedicationReminder> {
+        return list
+            .groupBy { normalizedMedicationKey(it.profileId, it.medicationName) }
+            .values
+            .mapNotNull { group ->
+                group.maxByOrNull { maxOf(it.updatedAt, it.createdAt) }?.let { winner ->
+                    winner.copy(
+                        medicationName = winner.medicationName.trim(),
+                        times = winner.times.distinct().sorted()
+                    )
+                }
+            }
+            .sortedByDescending { it.createdAt }
     }
 
     fun deleteReminder(reminderId: String) {
@@ -320,7 +360,7 @@ class LocalMedicalStore(private val context: Context) {
 
             _profiles.value = profileMap.values.toList().ifEmpty { FamilyProfile.defaultProfiles() }
             _records.value = recordMap.values.sortedByDescending { it.createdAt }
-            _reminders.value = reminderMap.values.sortedByDescending { it.createdAt }
+            _reminders.value = deduplicateReminders(reminderMap.values.toList())
             _intakeLogs.value = logMap.values.sortedByDescending { it.loggedAt }
             persistToDisk()
 
@@ -372,6 +412,11 @@ class LocalMedicalStore(private val context: Context) {
         private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"
 
         fun todayDateKey(): String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+        fun normalizedMedicationKey(profileId: String, medicationName: String): String {
+            val cleanName = medicationName.trim().lowercase().replace(Regex("\\s+"), " ")
+            return "$profileId::$cleanName"
+        }
     }
 }
 

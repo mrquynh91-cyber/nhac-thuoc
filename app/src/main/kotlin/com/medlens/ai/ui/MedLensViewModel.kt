@@ -431,7 +431,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         val sample = SampleMedicalData.createSamplePrescriptionRecord(profileId)
         localStore.upsertRecord(sample)
         _activeRecordDetailId.value = sample.id
-        _snackbarMessage.value = "Đã tạo đơn thuốc mẫu — bấm 'Tạo lịch nhắc uống thuốc' để thử ngay!"
+        _snackbarMessage.value = "Đã tạo đơn thuốc mẫu — bấm 'Chọn giờ & Nhắc' ở từng thuốc để đặt lịch!"
     }
 
     fun deleteRecord(recordId: String) {
@@ -491,11 +491,17 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun saveReminder(reminder: MedicationReminder, notifyUser: Boolean = true) {
+        val targetKey = LocalMedicalStore.normalizedMedicationKey(reminder.profileId, reminder.medicationName)
+        val alreadyExists = localStore.reminders.value.any {
+            (reminder.id.isNotBlank() && it.id == reminder.id) ||
+                LocalMedicalStore.normalizedMedicationKey(it.profileId, it.medicationName) == targetKey
+        }
         localStore.upsertReminder(reminder)
         scheduler.rescheduleAll(localStore.reminders.value)
         if (notifyUser) {
+            val action = if (alreadyExists) "Đã cập nhật lịch nhắc" else "Đã lưu lịch nhắc"
             _snackbarMessage.value =
-                "✅ Đã lưu lịch nhắc uống thuốc: ${reminder.medicationName} (${reminder.times.joinToString(", ")})"
+                "✅ $action: ${reminder.medicationName.trim()} (${reminder.times.distinct().sorted().joinToString(", ")})"
         }
         triggerAutoSyncIfReady()
     }
