@@ -49,14 +49,82 @@ data class FamilyProfile(
     val name: String,
     val relationship: String = "Bản thân",
     val birthYear: String = "",
+    val dateOfBirth: String = "", // dd/MM/yyyy
+    val gender: String = "", // Nam | Nữ | Khác
+    val heightCm: String = "", // cm, vd: 168
+    val weightKg: String = "", // kg, vd: 65
+    val bloodPressure: String = "", // vd: 120/80 mmHg
     val bloodType: String = "",
     val drugAllergies: String = "",
     val chronicConditions: String = "",
     val bhytCardNumber: String = "",
+    val emergencyContact: String = "",
     val bhytImagePath: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
+    fun resolvedBirthDate(): String = dateOfBirth.ifBlank { birthYear }
+
+    fun calculatedAge(today: LocalDate = LocalDate.now()): Int? {
+        val raw = dateOfBirth.trim().ifBlank { birthYear.trim() }
+        if (raw.isBlank()) return null
+        val dmyMatch = Regex("^(\\d{1,2})[/\\-.](\\d{1,2})[/\\-.](\\d{4})$").find(raw)
+        if (dmyMatch != null) {
+            val day = dmyMatch.groupValues[1].toIntOrNull() ?: return null
+            val month = dmyMatch.groupValues[2].toIntOrNull() ?: return null
+            val year = dmyMatch.groupValues[3].toIntOrNull() ?: return null
+            return runCatching {
+                val dob = LocalDate.of(year, month, day)
+                ChronoUnit.YEARS.between(dob, today).toInt().takeIf { it in 0..130 }
+            }.getOrNull()
+        }
+        val yearOnly = Regex("(\\d{4})").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+        val age = today.year - yearOnly
+        return age.takeIf { it in 0..130 }
+    }
+
+    fun calculatedBmi(): Double? {
+        val h = heightCm.replace(",", ".").trim().toDoubleOrNull() ?: return null
+        val w = weightKg.replace(",", ".").trim().toDoubleOrNull() ?: return null
+        if (h < 40.0 || h > 250.0 || w < 2.0 || w > 300.0) return null
+        val meters = h / 100.0
+        return w / (meters * meters)
+    }
+
+    fun bmiCategoryVi(): String? {
+        val bmi = calculatedBmi() ?: return null
+        return when {
+            bmi < 18.5 -> "Thiếu cân"
+            bmi < 23.0 -> "Bình thường"
+            bmi < 25.0 -> "Thừa cân"
+            else -> "Béo phì"
+        }
+    }
+
+    fun aiContextSummary(): String {
+        val parts = mutableListOf<String>()
+        parts.add("${name} (${relationship})")
+        gender.takeIf { it.isNotBlank() }?.let { parts.add("Giới tính: $it") }
+        val age = calculatedAge()
+        val dob = resolvedBirthDate()
+        when {
+            age != null && dob.isNotBlank() -> parts.add("Ngày sinh: $dob ($age tuổi)")
+            age != null -> parts.add("$age tuổi")
+            dob.isNotBlank() -> parts.add("Sinh: $dob")
+        }
+        if (heightCm.isNotBlank()) parts.add("Chiều cao: ${heightCm.trim()} cm")
+        if (weightKg.isNotBlank()) parts.add("Cân nặng: ${weightKg.trim()} kg")
+        calculatedBmi()?.let { bmi ->
+            val cat = bmiCategoryVi().orEmpty()
+            parts.add("BMI: ${"%.1f".format(bmi)} ($cat)")
+        }
+        bloodPressure.takeIf { it.isNotBlank() }?.let { parts.add("Huyết áp: $it") }
+        bloodType.takeIf { it.isNotBlank() && it != "Chưa cập nhật" }?.let { parts.add("Nhóm máu: $it") }
+        parts.add("Dị ứng thuốc/thực phẩm: ${drugAllergies.ifBlank { "chưa ghi nhận" }}")
+        parts.add("Bệnh nền: ${chronicConditions.ifBlank { "chưa ghi nhận" }}")
+        return parts.joinToString("; ")
+    }
+
     companion object {
         const val DEFAULT_SELF_ID = "profile_self"
         const val DEFAULT_MOM_ID = "profile_mom"
@@ -270,12 +338,26 @@ data class AppSettings(
 }
 
 @Serializable
+data class PatientDietPlan(
+    val conditionKey: String = "custom",
+    val conditionTitle: String = "",
+    val summary: String = "",
+    val shouldEat: List<String> = emptyList(),
+    val shouldAvoid: List<String> = emptyList(),
+    val medicationFoodNotes: List<String> = emptyList(),
+    val sampleDayMenu: List<String> = emptyList(),
+    val generatedByAi: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class LocalDatabaseSnapshot(
     val profiles: List<FamilyProfile> = emptyList(),
     val records: List<MedicalRecord> = emptyList(),
     val reminders: List<MedicationReminder> = emptyList(),
     val intakeLogs: List<MedicationIntakeLog> = emptyList(),
     val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap(),
+    val dietPlans: Map<String, PatientDietPlan> = emptyMap(),
     val deletedProfileIds: Map<String, Long> = emptyMap(),
     val deletedRecordIds: Map<String, Long> = emptyMap(),
     val deletedReminderIds: Map<String, Long> = emptyMap()

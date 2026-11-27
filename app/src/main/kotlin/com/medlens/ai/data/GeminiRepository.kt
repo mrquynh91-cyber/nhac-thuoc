@@ -135,7 +135,7 @@ class GeminiRepository(
                 record.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
             )
             val profileNote = profile?.let {
-                "Thông tin thành viên: ${it.name} (${it.relationship}), dị ứng thuốc: ${it.drugAllergies.ifBlank { "chưa ghi nhận" }}, bệnh nền: ${it.chronicConditions.ifBlank { "chưa ghi nhận" }}."
+                "Thông tin thành viên: ${it.aiContextSummary()}."
             }.orEmpty()
 
             val systemText = """
@@ -210,7 +210,7 @@ class GeminiRepository(
                 record.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
             )
             val profileNote = profile?.let {
-                "Thông tin thành viên: ${it.name} (${it.relationship}), dị ứng thuốc: ${it.drugAllergies.ifBlank { "chưa ghi nhận" }}, bệnh nền: ${it.chronicConditions.ifBlank { "chưa ghi nhận" }}."
+                "Thông tin thành viên: ${it.aiContextSummary()}."
             }.orEmpty()
 
             val systemText = """
@@ -522,6 +522,115 @@ class GeminiRepository(
         }
     }
 
+    suspend fun generatePersonalizedDietPlan(
+        profile: FamilyProfile,
+        conditionKey: String,
+        conditionLabel: String,
+        extraPreference: String,
+        recentRecords: List<MedicalRecord>,
+        activeReminders: List<MedicationReminder>,
+        endpoint: GeminiEndpointConfig,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<PatientDietPlan> = withContext(Dispatchers.IO) {
+        if (!endpoint.isReady) {
+            return@withContext Result.failure(
+                IllegalStateException("Chưa cấu hình máy chủ AI hoặc Gemini API Key.")
+            )
+        }
+
+        runCatching {
+            val medsSummary = activeReminders.take(8).joinToString("; ") { med ->
+                "${med.medicationName} (${med.dosage}, ${med.mealTiming.labelVi})"
+            }.ifBlank { "Chưa ghi nhận thuốc đang uống" }
+
+            val abnormalLabs = recentRecords.take(3)
+                .flatMap { it.labIndicators }
+                .filter { it.status != IndicatorStatus.NORMAL }
+                .take(8)
+                .joinToString("; ") { "${it.name}: ${it.value} ${it.unit} (${it.status.labelVi})" }
+                .ifBlank { "Chưa có chỉ số bất thường" }
+
+            val systemPrompt = """
+                Bạn là chuyên gia dinh dưỡng lâm sàng tiếng Việt của ứng dụng "Hiểu Đơn" (MedRead VN).
+                Hãy thiết kế chế độ ăn kiêng & thực đơn 1 ngày thuần Việt, dễ nấu, an toàn y khoa, cá nhân hóa sát theo hồ sơ thể trạng (tuổi, giới tính, chiều cao, cân nặng, BMI), bệnh lý, chỉ số xét nghiệm và thuốc đang uống của người bệnh.
+                Không kê đơn thuốc, không khẳng định chữa khỏi bệnh bằng ăn uống; luôn chú ý tương tác giữa thức ăn và thuốc đang dùng.
+            """.trimIndent()
+
+            val userPrompt = """
+                Thông tin người bệnh: ${profile.aiContextSummary()}
+                Nhóm bệnh lý / mục tiêu ăn kiêng: $conditionLabel
+                Thuốc đang dùng: $medsSummary
+                Chỉ số xét nghiệm bất thường gần đây: $abnormalLabs
+                Ghi chú khẩu vị / dị ứng riêng: ${extraPreference.ifBlank { "Không có" }}
+
+                Trả về DUY NHẤT 1 đối tượng JSON hợp lệ (không markdown) đúng mẫu:
+                {
+                  "conditionTitle": "Tiêu đề chế độ ăn cá nhân hóa cho ${profile.name}",
+                  "summary": "Tóm tắt 2-3 câu về mục tiêu dinh dưỡng phù hợp thể trạng/BMI và bệnh lý",
+                  "shouldEat": ["Nhóm thực phẩm/món Việt nên ăn 1", "Mục 2", "Mục 3", "Mục 4"],
+                  "shouldAvoid": ["Thực phẩm/đồ uống cần kiêng tuyệt đối 1", "Mục 2", "Mục 3", "Mục 4"],
+                  "medicationFoodNotes": ["Lưu ý tương tác thực phẩm với thuốc đang uống 1", "Mục 2"],
+                  "sampleDayMenu": [
+                    "Sáng: ...",
+                    "Trưa: ...",
+                    "Chiều nhẹ: ...",
+                    "Tối: ..."
+                  ]
+                }
+            """.trimIndent()
+
+            val root = buildJsonObject {
+                put("system_instruction", buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemPrompt) })
+                    })
+                })
+                put("contents", buildJsonArray {
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject { put("text", userPrompt) })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.3)
+                    put("responseMimeType", "application/json")
+                })
+            }
+
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                endpoint = endpoint,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            val text = extractCandidateText(responseBody)
+            val slice = extractJsonObjectSlice(stripMarkdownFence(text))
+            val obj = json.parseToJsonElement(slice).jsonObject
+
+            fun strList(key: String): List<String> =
+                obj[key]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
+                    ?.filter { it.isNotBlank() }
+                    .orEmpty()
+
+            PatientDietPlan(
+                conditionKey = conditionKey,
+                conditionTitle = obj["conditionTitle"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?.ifBlank { "Thực đơn cho ${profile.name} ($conditionLabel)" }
+                    ?: "Thực đơn cho ${profile.name} ($conditionLabel)",
+                summary = obj["summary"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty(),
+                shouldEat = strList("shouldEat"),
+                shouldAvoid = strList("shouldAvoid"),
+                medicationFoodNotes = strList("medicationFoodNotes"),
+                sampleDayMenu = strList("sampleDayMenu"),
+                generatedByAi = true,
+                updatedAt = System.currentTimeMillis()
+            )
+        }
+    }
+
     private fun executeGenerateContentWithAutoFallback(
         preferredModel: String,
         endpoint: GeminiEndpointConfig,
@@ -769,7 +878,7 @@ class GeminiRepository(
             DocumentType.MIXED -> "Hãy tự nhận diện đây là phiếu xét nghiệm, đơn thuốc, vỏ hộp/chai thuốc, hay cả hai."
         }
         val profileInfo = profileContext?.let {
-            "Hồ sơ người khám: ${it.name} (${it.relationship}), dị ứng thuốc: ${it.drugAllergies.ifBlank { "chưa có" }}, bệnh nền: ${it.chronicConditions.ifBlank { "chưa có" }}."
+            "Hồ sơ người khám: ${it.aiContextSummary()}."
         }.orEmpty()
 
         val systemPrompt = """

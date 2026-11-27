@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,6 +44,7 @@ import com.medlens.ai.ui.screens.AiChatScreen
 import com.medlens.ai.ui.screens.FamilyRecordsScreen
 import com.medlens.ai.ui.screens.HomeScreen
 import com.medlens.ai.ui.screens.MedicationManagerScreen
+import com.medlens.ai.ui.screens.MoreAndDietScreen
 import com.medlens.ai.ui.screens.ScanScreen
 import com.medlens.ai.ui.screens.SyncAndOtaScreen
 import com.medlens.ai.ui.theme.MedLensTheme
@@ -73,6 +75,8 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val activeTodayDoses by vm.activeProfileTodayDoses.collectAsState()
     val activeTrends by vm.activeProfileTrends.collectAsState()
     val activeAssistantChat by vm.activeProfileAssistantChat.collectAsState()
+    val activeDietPlan by vm.activeProfileDietPlan.collectAsState()
+    val isGeneratingDiet by vm.isGeneratingDiet.collectAsState()
     val settings by vm.settings.collectAsState()
     val cloudSyncState by vm.cloudSyncState.collectAsState()
     val otaState by vm.otaState.collectAsState()
@@ -87,6 +91,8 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showMedicationManager by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
+    var recordsInitialSubTab by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(snackbarMsg) {
         val msg = snackbarMsg
@@ -95,6 +101,49 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             snackbarHostState.showSnackbar(msg)
             vm.consumeSnackbar()
         }
+    }
+
+    if (showSettingsScreen) {
+        SyncAndOtaScreen(
+            activeProfile = activeProfile,
+            reminders = activeReminders,
+            settings = settings,
+            cloudSyncState = cloudSyncState,
+            otaState = otaState,
+            otaUpdater = vm.otaUpdater,
+            snackbarHostState = snackbarHostState,
+            isTelegramBusy = isTelegramBusy,
+            discoveredTelegramChats = discoveredTelegramChats,
+            onBack = { showSettingsScreen = false },
+            onSaveDefaultSlotTimes = { m, n, a, e -> vm.saveDefaultSlotTimes(m, n, a, e) },
+            onSaveReminder = { vm.saveReminder(it) },
+            onToggleReminder = { vm.toggleReminderActive(it) },
+            onDeleteReminder = { vm.deleteReminder(it) },
+            onSendTestNotification = { vm.sendTestNotification() },
+            onSaveTelegramConfig = { enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip ->
+                vm.saveTelegramConfig(enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip)
+            },
+            onDiscoverTelegramGroups = { vm.discoverTelegramGroups(it) },
+            onSendTelegramTest = { botToken, chatId, groupName ->
+                vm.sendTelegramTestMessage(botToken, chatId, groupName)
+            },
+            onSaveGeminiConfig = { key, proxy, token, model ->
+                vm.saveGeminiConfig(key, proxy, token, model)
+            },
+            onSaveOtaConfig = { repo, token, auto -> vm.saveOtaConfig(repo, token, auto) },
+            onToggleAutoSync = { vm.toggleAutoSync(it) },
+            onSignInFirebase = { email, pass -> vm.signInFirebase(email, pass) },
+            onRegisterFirebase = { email, pass -> vm.registerFirebase(email, pass) },
+            onSignInAnonymously = { vm.signInAnonymouslyFirebase() },
+            onSignOutFirebase = { vm.signOutFirebase() },
+            onSyncFirebaseNow = { vm.syncFirebaseNow() },
+            onBuildBackupJson = { vm.buildBackupJson() },
+            onRestoreBackupJson = { vm.restoreBackupJson(it) },
+            onCheckOtaUpdate = { vm.checkForOtaUpdate() },
+            onDownloadOtaApk = { vm.downloadOtaApk(it) },
+            onShowMessage = { vm.showMessage(it) }
+        )
+        return
     }
 
     if (showMedicationManager) {
@@ -148,11 +197,16 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                             MainTab.SCAN -> Icons.Default.CameraAlt
                             MainTab.RECORDS -> Icons.Default.FolderShared
                             MainTab.AI_CHAT -> Icons.Default.AutoAwesome
-                            MainTab.SETTINGS -> Icons.Default.Settings
+                            MainTab.MORE -> Icons.Default.Apps
                         }
                         NavigationBarItem(
                             selected = selectedTab == tab,
-                            onClick = { vm.selectTab(tab) },
+                            onClick = {
+                                if (tab == MainTab.RECORDS) {
+                                    recordsInitialSubTab = 0
+                                }
+                                vm.selectTab(tab)
+                            },
                             icon = { Icon(icon, contentDescription = tab.label) },
                             label = {
                                 Text(
@@ -184,8 +238,11 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     otaState = otaState,
                     onSelectProfile = { vm.selectProfile(it) },
                     onNavigateToScan = { vm.selectTab(MainTab.SCAN) },
-                    onNavigateToRecords = { vm.selectTab(MainTab.RECORDS) },
-                    onNavigateToSettings = { vm.selectTab(MainTab.SETTINGS) },
+                    onNavigateToRecords = {
+                        recordsInitialSubTab = 0
+                        vm.selectTab(MainTab.RECORDS)
+                    },
+                    onNavigateToSettings = { showSettingsScreen = true },
                     onOpenMedicationManager = { showMedicationManager = true },
                     onSaveReminder = { vm.saveReminder(it) },
                     onOpenRecord = { vm.openRecordDetail(it) },
@@ -203,7 +260,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     onAnalyzeAttachments = { attachments, mode -> vm.analyzeAttachments(attachments, mode) },
                     onLoadSampleLabWithTrend = { vm.loadSampleLabWithTrend() },
                     onLoadSamplePrescription = { vm.loadSamplePrescription() },
-                    onGoToSettings = { vm.selectTab(MainTab.SETTINGS) }
+                    onGoToSettings = { showSettingsScreen = true }
                 )
 
                 MainTab.RECORDS -> FamilyRecordsScreen(
@@ -211,11 +268,13 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     activeProfile = activeProfile,
                     records = activeRecords,
                     trends = activeTrends,
+                    initialSubTab = recordsInitialSubTab,
                     onSelectProfile = { vm.selectProfile(it) },
                     onSaveProfile = { vm.saveProfile(it) },
                     onSaveBhytImage = { prof, uri -> vm.saveBhytImage(prof, uri) },
                     onOpenRecord = { vm.openRecordDetail(it) },
-                    onLoadSampleLabWithTrend = { vm.loadSampleLabWithTrend() }
+                    onLoadSampleLabWithTrend = { vm.loadSampleLabWithTrend() },
+                    onOpenSettings = { showSettingsScreen = true }
                 )
 
                 MainTab.AI_CHAT -> AiChatScreen(
@@ -228,46 +287,26 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
                     onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
                     onClearChat = { vm.clearDirectAssistantChat() },
-                    onGoToSettings = { vm.selectTab(MainTab.SETTINGS) },
+                    onGoToSettings = { showSettingsScreen = true },
                     onShowMessage = { vm.showMessage(it) }
                 )
 
-                MainTab.SETTINGS -> SyncAndOtaScreen(
+                MainTab.MORE -> MoreAndDietScreen(
                     activeProfile = activeProfile,
-                    reminders = activeReminders,
-                    settings = settings,
-                    cloudSyncState = cloudSyncState,
-                    otaState = otaState,
-                    otaUpdater = vm.otaUpdater,
-                    isTelegramBusy = isTelegramBusy,
-                    discoveredTelegramChats = discoveredTelegramChats,
-                    onSaveDefaultSlotTimes = { m, n, a, e -> vm.saveDefaultSlotTimes(m, n, a, e) },
-                    onSaveReminder = { vm.saveReminder(it) },
-                    onToggleReminder = { vm.toggleReminderActive(it) },
-                    onDeleteReminder = { vm.deleteReminder(it) },
-                    onSendTestNotification = { vm.sendTestNotification() },
-                    onSaveTelegramConfig = { enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip ->
-                        vm.saveTelegramConfig(enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip)
+                    profileRecords = activeRecords,
+                    activeReminders = activeReminders,
+                    savedAiDietPlan = activeDietPlan,
+                    isGeneratingDiet = isGeneratingDiet,
+                    hasAiReady = settings.hasAiReady,
+                    onGenerateAiDiet = { key, label, pref ->
+                        vm.generatePersonalizedDietPlan(key, label, pref)
                     },
-                    onDiscoverTelegramGroups = { vm.discoverTelegramGroups(it) },
-                    onSendTelegramTest = { botToken, chatId, groupName ->
-                        vm.sendTelegramTestMessage(botToken, chatId, groupName)
+                    onOpenMedicationManager = { showMedicationManager = true },
+                    onOpenProfileInfo = {
+                        recordsInitialSubTab = 2
+                        vm.selectTab(MainTab.RECORDS)
                     },
-                    onSaveGeminiConfig = { key, proxy, token, model ->
-                        vm.saveGeminiConfig(key, proxy, token, model)
-                    },
-                    onSaveOtaConfig = { repo, token, auto -> vm.saveOtaConfig(repo, token, auto) },
-                    onToggleAutoSync = { vm.toggleAutoSync(it) },
-                    onSignInFirebase = { email, pass -> vm.signInFirebase(email, pass) },
-                    onRegisterFirebase = { email, pass -> vm.registerFirebase(email, pass) },
-                    onSignInAnonymously = { vm.signInAnonymouslyFirebase() },
-                    onSignOutFirebase = { vm.signOutFirebase() },
-                    onSyncFirebaseNow = { vm.syncFirebaseNow() },
-                    onBuildBackupJson = { vm.buildBackupJson() },
-                    onRestoreBackupJson = { vm.restoreBackupJson(it) },
-                    onCheckOtaUpdate = { vm.checkForOtaUpdate() },
-                    onDownloadOtaApk = { vm.downloadOtaApk(it) },
-                    onShowMessage = { vm.showMessage(it) }
+                    onOpenSettings = { showSettingsScreen = true }
                 )
             }
         }

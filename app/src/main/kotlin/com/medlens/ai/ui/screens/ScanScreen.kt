@@ -43,6 +43,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -190,17 +191,31 @@ fun ScanScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Column {
-                Text(
-                    text = "Quét AI • Hồ sơ ${activeProfile.name}",
-                    style = MaterialTheme.typography.headlineSmall
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Hỗ trợ chụp nhiều trang liên tiếp, chọn ảnh thư viện hoặc tải file PDF kết quả từ bệnh viện ($geminiModel).",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MutedText
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Quét AI • Hồ sơ ${activeProfile.name}",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Hỗ trợ chụp nhiều trang liên tiếp, chọn ảnh thư viện hoặc tải file PDF kết quả từ bệnh viện ($geminiModel).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MutedText
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                FilledTonalIconButton(onClick = onGoToSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Cài đặt",
+                        tint = TealPrimary
+                    )
+                }
             }
         }
 

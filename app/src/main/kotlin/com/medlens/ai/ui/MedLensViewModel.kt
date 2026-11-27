@@ -20,6 +20,7 @@ import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.data.MedicationIntakeLog
 import com.medlens.ai.data.MedicationItem
 import com.medlens.ai.data.MedicationReminder
+import com.medlens.ai.data.PatientDietPlan
 import com.medlens.ai.data.RecordChatMessage
 import com.medlens.ai.data.SampleMedicalData
 import com.medlens.ai.data.ScanAttachment
@@ -46,7 +47,7 @@ enum class MainTab(val label: String) {
     SCAN("Quét AI"),
     AI_CHAT("Gemini AI"),
     RECORDS("Sổ khám"),
-    SETTINGS("Cài đặt")
+    MORE("Thêm")
 }
 
 data class ScheduledDoseItem(
@@ -118,6 +119,16 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
     ) { map, prof ->
         map[prof.id].orEmpty()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeProfileDietPlan: StateFlow<PatientDietPlan?> = combine(
+        localStore.dietPlans,
+        activeProfile
+    ) { map, prof ->
+        map[prof.id]
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val _isGeneratingDiet = MutableStateFlow(false)
+    val isGeneratingDiet: StateFlow<Boolean> = _isGeneratingDiet.asStateFlow()
 
     private val _selectedTab = MutableStateFlow(MainTab.HOME)
     val selectedTab: StateFlow<MainTab> = _selectedTab.asStateFlow()
@@ -423,6 +434,39 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         val profile = activeProfile.value
         localStore.clearAssistantChat(profile.id)
         _snackbarMessage.value = "Đã bắt đầu cuộc trò chuyện mới cho ${profile.name}."
+    }
+
+    fun generatePersonalizedDietPlan(
+        conditionKey: String,
+        conditionLabel: String,
+        extraPreference: String
+    ) {
+        if (_isGeneratingDiet.value) return
+        val profile = activeProfile.value
+        val cfg = settings.value
+        viewModelScope.launch {
+            _isGeneratingDiet.value = true
+            val result = geminiRepo.generatePersonalizedDietPlan(
+                profile = profile,
+                conditionKey = conditionKey,
+                conditionLabel = conditionLabel,
+                extraPreference = extraPreference,
+                recentRecords = activeProfileRecords.value,
+                activeReminders = activeProfileReminders.value.filter { it.isActive },
+                endpoint = currentGeminiEndpoint(),
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            _isGeneratingDiet.value = false
+            result.onSuccess { plan ->
+                localStore.saveDietPlan(profile.id, plan)
+                _snackbarMessage.value = "✅ Đã tạo thực đơn ăn kiêng AI riêng cho ${profile.name}!"
+            }.onFailure { err ->
+                _snackbarMessage.value = err.localizedMessage ?: "Không thể tạo thực đơn AI lúc này."
+            }
+        }
     }
 
     fun loadSampleLabWithTrend() {

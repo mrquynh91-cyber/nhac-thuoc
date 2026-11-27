@@ -42,6 +42,9 @@ class LocalMedicalStore(private val context: Context) {
     private val _assistantChats = MutableStateFlow<Map<String, List<RecordChatMessage>>>(emptyMap())
     val assistantChats: StateFlow<Map<String, List<RecordChatMessage>>> = _assistantChats.asStateFlow()
 
+    private val _dietPlans = MutableStateFlow<Map<String, PatientDietPlan>>(emptyMap())
+    val dietPlans: StateFlow<Map<String, PatientDietPlan>> = _dietPlans.asStateFlow()
+
     private val deletedProfileIds = mutableMapOf<String, Long>()
     private val deletedRecordIds = mutableMapOf<String, Long>()
     private val deletedReminderIds = mutableMapOf<String, Long>()
@@ -77,6 +80,7 @@ class LocalMedicalStore(private val context: Context) {
                 _reminders.value = dedupedReminders
                 _intakeLogs.value = snapshot.intakeLogs.sortedByDescending { it.loggedAt }
                 _assistantChats.value = snapshot.assistantChats
+                _dietPlans.value = snapshot.dietPlans
                 if (droppedIds.isNotEmpty()) {
                     persistToDisk()
                 }
@@ -92,6 +96,7 @@ class LocalMedicalStore(private val context: Context) {
                 reminders = _reminders.value,
                 intakeLogs = _intakeLogs.value,
                 assistantChats = _assistantChats.value,
+                dietPlans = _dietPlans.value,
                 deletedProfileIds = deletedProfileIds.toMap(),
                 deletedRecordIds = deletedRecordIds.toMap(),
                 deletedReminderIds = deletedReminderIds.toMap()
@@ -241,6 +246,15 @@ class LocalMedicalStore(private val context: Context) {
             val currentMap = _assistantChats.value.toMutableMap()
             currentMap.remove(profileId)
             _assistantChats.value = currentMap
+            persistToDisk()
+        }
+    }
+
+    fun saveDietPlan(profileId: String, plan: PatientDietPlan) {
+        synchronized(lock) {
+            val currentMap = _dietPlans.value.toMutableMap()
+            currentMap[profileId] = plan.copy(updatedAt = System.currentTimeMillis())
+            _dietPlans.value = currentMap
             persistToDisk()
         }
     }

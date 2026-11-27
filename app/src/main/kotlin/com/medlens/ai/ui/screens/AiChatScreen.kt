@@ -293,12 +293,21 @@ fun AiChatScreen(
                         }
                     }
                 }
-                if (messages.isNotEmpty()) {
-                    IconButton(onClick = onClearChat) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (messages.isNotEmpty()) {
+                        IconButton(onClick = onClearChat) {
+                            Icon(
+                                Icons.Default.DeleteSweep,
+                                contentDescription = "Cuộc trò chuyện mới",
+                                tint = MutedText
+                            )
+                        }
+                    }
+                    FilledTonalIconButton(onClick = onGoToSettings) {
                         Icon(
-                            Icons.Default.DeleteSweep,
-                            contentDescription = "Cuộc trò chuyện mới",
-                            tint = MutedText
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Cài đặt",
+                            tint = TealPrimary
                         )
                     }
                 }

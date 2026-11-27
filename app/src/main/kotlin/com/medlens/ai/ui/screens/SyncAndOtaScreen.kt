@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
@@ -49,6 +50,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -57,10 +59,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -105,7 +112,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun SyncAndOtaScreen(
     activeProfile: FamilyProfile,
@@ -114,8 +121,10 @@ fun SyncAndOtaScreen(
     cloudSyncState: CloudSyncUiState,
     otaState: OtaUpdateState,
     otaUpdater: GitHubOtaUpdater,
+    snackbarHostState: SnackbarHostState,
     isTelegramBusy: Boolean,
     discoveredTelegramChats: List<TelegramDiscoveredChat>,
+    onBack: () -> Unit,
     onSaveDefaultSlotTimes: (String, String, String, String) -> Unit,
     onSaveReminder: (MedicationReminder) -> Unit,
     onToggleReminder: (MedicationReminder) -> Unit,
@@ -247,25 +256,41 @@ fun SyncAndOtaScreen(
     var expandedBackup by remember { mutableStateOf(false) }
     var expandedOta by remember { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Column {
-                Text(
-                    text = "Cài đặt, Nhắc thuốc & OTA",
-                    style = MaterialTheme.typography.headlineSmall
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "Cài đặt, Nhắc thuốc & OTA",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Bấm vào từng mục bên dưới để mở rộng hoặc thu gọn",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MutedText
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "Bấm vào từng mục bên dưới để mở rộng hoặc thu gọn",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MutedText
-                )
-            }
+            )
         }
+    ) { scaffoldPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(scaffoldPadding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
 
         // 1. Medication Reminders & Default Slot Times
         item {
@@ -1101,6 +1126,7 @@ fun SyncAndOtaScreen(
                     }
                 )
             }
+        }
         }
     }
 

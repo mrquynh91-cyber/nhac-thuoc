@@ -1,5 +1,6 @@
 package com.medlens.ai.ui.screens
 
+import android.app.DatePickerDialog
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -8,6 +9,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,17 +24,23 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CreditCard
-import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +50,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,7 +65,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.medlens.ai.data.FamilyProfile
@@ -63,14 +75,19 @@ import com.medlens.ai.data.IndicatorStatus
 import com.medlens.ai.data.IndicatorTrendSeries
 import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.ui.theme.AlertRed
+import com.medlens.ai.ui.theme.AlertRedBg
 import com.medlens.ai.ui.theme.InfoBlue
 import com.medlens.ai.ui.theme.InfoBlueBg
 import com.medlens.ai.ui.theme.MutedText
 import com.medlens.ai.ui.theme.NormalGreen
 import com.medlens.ai.ui.theme.NormalGreenBg
+import com.medlens.ai.ui.theme.TealDark
+import com.medlens.ai.ui.theme.TealLightContainer
 import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
+import com.medlens.ai.ui.theme.WarningAmberBg
 import java.io.File
+import java.util.Calendar
 
 @Composable
 fun FamilyRecordsScreen(
@@ -78,23 +95,44 @@ fun FamilyRecordsScreen(
     activeProfile: FamilyProfile,
     records: List<MedicalRecord>,
     trends: List<IndicatorTrendSeries>,
+    initialSubTab: Int = 0,
     onSelectProfile: (String) -> Unit,
     onSaveProfile: (FamilyProfile) -> Unit,
     onSaveBhytImage: (FamilyProfile, Uri) -> Unit,
     onOpenRecord: (MedicalRecord) -> Unit,
-    onLoadSampleLabWithTrend: () -> Unit
+    onLoadSampleLabWithTrend: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    var selectedSubTab by remember { mutableIntStateOf(0) }
+    var selectedSubTab by remember { mutableIntStateOf(initialSubTab) }
     var showAddMemberDialog by remember { mutableStateOf(false) }
 
+    LaunchedEffect(initialSubTab) {
+        if (initialSubTab in 0..2) {
+            selectedSubTab = initialSubTab
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Family Member Filter Row
+        // Family Member Filter Row + Top-right Settings button
         Column(modifier = Modifier.padding(fromHorizontal = 16.dp, top = 14.dp, bottom = 6.dp)) {
-            Text(
-                text = "Sổ Khám Gia Đình",
-                style = MaterialTheme.typography.headlineSmall
-            )
-            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sổ Khám Gia Đình",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                FilledTonalIconButton(onClick = onOpenSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Cài đặt",
+                        tint = TealPrimary
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -245,7 +283,7 @@ private fun TrendChartSubTab(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            Icons.Default.ShowChart,
+                            Icons.AutoMirrored.Filled.ShowChart,
                             contentDescription = null,
                             tint = TealPrimary,
                             modifier = Modifier.size(44.dp)
@@ -383,7 +421,6 @@ private fun IndicatorTrendCard(series: IndicatorTrendSeries) {
 
             Spacer(Modifier.height(14.dp))
 
-            // Line Chart Canvas
             val points = series.points
             val minVal = points.minOf { it.value }
             val maxVal = points.maxOf { it.value }
@@ -398,7 +435,6 @@ private fun IndicatorTrendCard(series: IndicatorTrendSeries) {
                 val w = size.width
                 val h = size.height
 
-                // Horizontal grid lines
                 listOf(0f, 0.5f, 1f).forEach { frac ->
                     val y = h * frac
                     drawLine(
@@ -463,18 +499,39 @@ private fun IndicatorTrendCard(series: IndicatorTrendSeries) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BasicProfileInfoSubTab(
     profile: FamilyProfile,
     onSaveProfile: (FamilyProfile) -> Unit,
     onSaveBhytImage: (FamilyProfile, Uri) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember(profile.id) { mutableStateOf(profile.name) }
-    var birthYear by remember(profile.id) { mutableStateOf(profile.birthYear) }
+    var dateOfBirth by remember(profile.id) { mutableStateOf(profile.dateOfBirth.ifBlank { profile.birthYear }) }
+    var gender by remember(profile.id) { mutableStateOf(profile.gender) }
+    var heightCm by remember(profile.id) { mutableStateOf(profile.heightCm) }
+    var weightKg by remember(profile.id) { mutableStateOf(profile.weightKg) }
     var bloodType by remember(profile.id) { mutableStateOf(profile.bloodType) }
+    var bloodPressure by remember(profile.id) { mutableStateOf(profile.bloodPressure) }
     var drugAllergies by remember(profile.id) { mutableStateOf(profile.drugAllergies) }
     var chronicConditions by remember(profile.id) { mutableStateOf(profile.chronicConditions) }
     var bhytNumber by remember(profile.id) { mutableStateOf(profile.bhytCardNumber) }
+    var emergencyContact by remember(profile.id) { mutableStateOf(profile.emergencyContact) }
+
+    val draftProfile = remember(name, dateOfBirth, gender, heightCm, weightKg) {
+        profile.copy(
+            name = name,
+            dateOfBirth = dateOfBirth,
+            birthYear = dateOfBirth,
+            gender = gender,
+            heightCm = heightCm,
+            weightKg = weightKg
+        )
+    }
+    val liveAge = draftProfile.calculatedAge()
+    val liveBmi = draftProfile.calculatedBmi()
+    val liveBmiCat = draftProfile.bmiCategoryVi()
 
     val bhytPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -489,6 +546,66 @@ private fun BasicProfileInfoSubTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Live Vitals & BMI Summary Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = TealLightContainer.copy(alpha = 0.55f)),
+                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.MonitorHeart, contentDescription = null, tint = TealPrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Chỉ số thể trạng • ${name.ifBlank { profile.name }}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TealDark
+                        )
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (liveAge != null) {
+                            VitalsBadge(text = "$liveAge tuổi", bg = Color.White, fg = TealDark)
+                        }
+                        if (gender.isNotBlank()) {
+                            VitalsBadge(text = gender, bg = Color.White, fg = TealDark)
+                        }
+                        if (heightCm.isNotBlank()) {
+                            VitalsBadge(text = "Cao ${heightCm.trim()} cm", bg = Color.White, fg = TealDark)
+                        }
+                        if (weightKg.isNotBlank()) {
+                            VitalsBadge(text = "Nặng ${weightKg.trim()} kg", bg = Color.White, fg = TealDark)
+                        }
+                        if (liveBmi != null && liveBmiCat != null) {
+                            val (bmiBg, bmiFg) = when {
+                                liveBmi < 18.5 -> InfoBlueBg to InfoBlue
+                                liveBmi < 23.0 -> NormalGreenBg to NormalGreen
+                                liveBmi < 25.0 -> WarningAmberBg to WarningAmber
+                                else -> AlertRedBg to AlertRed
+                            }
+                            VitalsBadge(
+                                text = "BMI %.1f • %s".format(liveBmi, liveBmiCat),
+                                bg = bmiBg,
+                                fg = bmiFg
+                            )
+                        }
+                        if (liveAge == null && heightCm.isBlank() && weightKg.isBlank()) {
+                            Text(
+                                text = "Điền ngày sinh, chiều cao và cân nặng bên dưới để tự tính BMI & gợi ý thực đơn ăn kiêng chuẩn hơn.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MutedText
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Editable Profile Form
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -501,7 +618,7 @@ private fun BasicProfileInfoSubTab(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Thông tin y tế cơ bản (${profile.relationship})",
+                        text = "Thông tin cá nhân & y tế (${profile.relationship})",
                         style = MaterialTheme.typography.titleMedium
                     )
                     OutlinedTextField(
@@ -511,15 +628,82 @@ private fun BasicProfileInfoSubTab(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    // Date of birth with calendar picker
+                    OutlinedTextField(
+                        value = dateOfBirth,
+                        onValueChange = { dateOfBirth = it },
+                        label = { Text("Ngày tháng năm sinh (dd/MM/yyyy)") },
+                        placeholder = { Text("Vd: 15/08/1965") },
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    val cal = Calendar.getInstance()
+                                    val dmy = Regex("^(\\d{1,2})[/\\-.](\\d{1,2})[/\\-.](\\d{4})$")
+                                        .find(dateOfBirth.trim())
+                                    val initYear = dmy?.groupValues?.get(3)?.toIntOrNull()
+                                        ?: dateOfBirth.trim().toIntOrNull()?.takeIf { it in 1900..cal.get(Calendar.YEAR) }
+                                        ?: (cal.get(Calendar.YEAR) - 35)
+                                    val initMonth = (dmy?.groupValues?.get(2)?.toIntOrNull() ?: 1) - 1
+                                    val initDay = dmy?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                                    DatePickerDialog(
+                                        context,
+                                        { _, y, m, d ->
+                                            dateOfBirth = "%02d/%02d/%04d".format(d, m + 1, y)
+                                        },
+                                        initYear,
+                                        initMonth.coerceIn(0, 11),
+                                        initDay.coerceIn(1, 31)
+                                    ).show()
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.CalendarMonth,
+                                    contentDescription = "Chọn ngày sinh",
+                                    tint = TealPrimary
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Gender chips
+                    Text("Giới tính", style = MaterialTheme.typography.labelMedium, color = MutedText)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Nam", "Nữ", "Khác").forEach { option ->
+                            FilterChip(
+                                selected = gender == option,
+                                onClick = { gender = if (gender == option) "" else option },
+                                label = { Text(option) }
+                            )
+                        }
+                    }
+
+                    // Height & Weight side by side
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
-                            value = birthYear,
-                            onValueChange = { birthYear = it },
-                            label = { Text("Năm sinh") },
-                            placeholder = { Text("1965") },
+                            value = heightCm,
+                            onValueChange = { v -> heightCm = v.filter { it.isDigit() || it == '.' || it == ',' }.take(5) },
+                            label = { Text("Chiều cao (cm)") },
+                            placeholder = { Text("Vd: 168") },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f)
                         )
+                        OutlinedTextField(
+                            value = weightKg,
+                            onValueChange = { v -> weightKg = v.filter { it.isDigit() || it == '.' || it == ',' }.take(5) },
+                            label = { Text("Cân nặng (kg)") },
+                            placeholder = { Text("Vd: 65") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Blood type & Blood pressure side by side
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = bloodType,
                             onValueChange = { bloodType = it },
@@ -528,7 +712,16 @@ private fun BasicProfileInfoSubTab(
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
+                        OutlinedTextField(
+                            value = bloodPressure,
+                            onValueChange = { bloodPressure = it },
+                            label = { Text("Huyết áp") },
+                            placeholder = { Text("120/80") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+
                     OutlinedTextField(
                         value = drugAllergies,
                         onValueChange = { drugAllergies = it },
@@ -540,7 +733,7 @@ private fun BasicProfileInfoSubTab(
                         value = chronicConditions,
                         onValueChange = { chronicConditions = it },
                         label = { Text("Bệnh nền đang theo dõi") },
-                        placeholder = { Text("Vd: Huyết áp cao, đau dạ dày, tiểu đường...") },
+                        placeholder = { Text("Vd: Viêm gan B, huyết áp cao, tiểu đường...") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
@@ -550,17 +743,33 @@ private fun BasicProfileInfoSubTab(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    OutlinedTextField(
+                        value = emergencyContact,
+                        onValueChange = { emergencyContact = it },
+                        label = { Text("SĐT người thân / liên hệ khẩn cấp") },
+                        placeholder = { Text("Vd: 09xx xxx xxx (Con trai)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     Button(
                         onClick = {
+                            val extractedYear = Regex("(\\d{4})").find(dateOfBirth)?.groupValues?.get(1).orEmpty()
                             onSaveProfile(
                                 profile.copy(
                                     name = name.ifBlank { profile.name },
-                                    birthYear = birthYear.trim(),
+                                    dateOfBirth = dateOfBirth.trim(),
+                                    birthYear = extractedYear.ifBlank { profile.birthYear },
+                                    gender = gender.trim(),
+                                    heightCm = heightCm.trim(),
+                                    weightKg = weightKg.trim(),
                                     bloodType = bloodType.trim(),
+                                    bloodPressure = bloodPressure.trim(),
                                     drugAllergies = drugAllergies.trim(),
                                     chronicConditions = chronicConditions.trim(),
-                                    bhytCardNumber = bhytNumber.trim()
+                                    bhytCardNumber = bhytNumber.trim(),
+                                    emergencyContact = emergencyContact.trim()
                                 )
                             )
                         },
@@ -627,12 +836,27 @@ private fun BasicProfileInfoSubTab(
 }
 
 @Composable
+private fun VitalsBadge(text: String, bg: Color, fg: Color) {
+    Surface(color = bg, shape = RoundedCornerShape(50)) {
+        Text(
+            text = text,
+            color = fg,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
 private fun AddFamilyMemberDialog(
     onDismiss: () -> Unit,
     onSave: (FamilyProfile) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var relationship by remember { mutableStateOf("Người thân") }
+    var dateOfBirth by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("") }
     var allergies by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -656,6 +880,23 @@ private fun AddFamilyMemberDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
+                    value = dateOfBirth,
+                    onValueChange = { dateOfBirth = it },
+                    label = { Text("Ngày tháng năm sinh") },
+                    placeholder = { Text("Vd: 20/05/1958") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Nam", "Nữ").forEach { g ->
+                        FilterChip(
+                            selected = gender == g,
+                            onClick = { gender = if (gender == g) "" else g },
+                            label = { Text(g) }
+                        )
+                    }
+                }
+                OutlinedTextField(
                     value = allergies,
                     onValueChange = { allergies = it },
                     label = { Text("Dị ứng thuốc (nếu có)") },
@@ -667,10 +908,14 @@ private fun AddFamilyMemberDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
+                        val extractedYear = Regex("(\\d{4})").find(dateOfBirth)?.groupValues?.get(1).orEmpty()
                         onSave(
                             FamilyProfile(
                                 name = name.trim(),
                                 relationship = relationship.ifBlank { "Người thân" },
+                                dateOfBirth = dateOfBirth.trim(),
+                                birthYear = extractedYear,
+                                gender = gender,
                                 drugAllergies = allergies.trim()
                             )
                         )
