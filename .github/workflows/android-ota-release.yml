@@ -87,6 +87,8 @@ jobs:
           APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
           GITHUB_OTA_REPO: ${{ github.repository }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
+          GEMINI_PROXY_TOKEN: ${{ secrets.GEMINI_PROXY_TOKEN }}
           RELEASE_STORE_FILE: hieudon-release.jks
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}

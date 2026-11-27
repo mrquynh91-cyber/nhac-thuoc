@@ -114,7 +114,7 @@ fun SyncAndOtaScreen(
     onToggleReminder: (MedicationReminder) -> Unit,
     onDeleteReminder: (MedicationReminder) -> Unit,
     onSendTestNotification: () -> Unit,
-    onSaveGeminiConfig: (String, String) -> Unit,
+    onSaveGeminiConfig: (apiKey: String, proxyUrl: String, proxyToken: String, model: String) -> Unit,
     onSaveOtaConfig: (String, String, Boolean) -> Unit,
     onToggleAutoSync: (Boolean) -> Unit,
     onSignInFirebase: (String, String) -> Unit,
@@ -151,6 +151,8 @@ fun SyncAndOtaScreen(
 
     // Gemini inputs
     var apiKeyInput by remember(settings.geminiApiKey) { mutableStateOf(settings.geminiApiKey) }
+    var proxyUrlInput by remember(settings.geminiProxyUrl) { mutableStateOf(settings.geminiProxyUrl) }
+    var proxyTokenInput by remember(settings.geminiProxyToken) { mutableStateOf(settings.geminiProxyToken) }
     var selectedModel by remember(settings.geminiModel) { mutableStateOf(settings.geminiModel) }
     var showApiKey by remember { mutableStateOf(false) }
 
@@ -411,33 +413,35 @@ fun SyncAndOtaScreen(
 
         // 2. Gemini AI Card
         item {
-            val hasKey = settings.geminiApiKey.isNotBlank()
+            val geminiSubtitle = when {
+                settings.isUsingProxy -> "Máy chủ AI tích hợp sẵn • ${settings.geminiModel}"
+                settings.geminiApiKey.isNotBlank() -> "Khóa API cá nhân • ${settings.geminiModel}"
+                else -> "Chưa cấu hình AI • Bấm để cài đặt"
+            }
             SectionCard(
                 title = "Tích hợp AI Gemini",
-                subtitle = if (hasKey) "Đã có API Key • ${settings.geminiModel}" else "Chưa nhập API Key • Bấm để cài đặt",
-                subtitleColor = if (hasKey) NormalGreen else WarningAmber,
+                subtitle = geminiSubtitle,
+                subtitleColor = if (settings.hasAiReady) NormalGreen else WarningAmber,
                 icon = Icons.Default.AutoAwesome,
                 expanded = expandedGemini,
                 onToggle = { expandedGemini = !expandedGemini }
             ) {
-                OutlinedTextField(
-                    value = apiKeyInput,
-                    onValueChange = { apiKeyInput = it },
-                    label = { Text("Gemini API Key") },
-                    placeholder = { Text("AIzaSy...") },
-                    singleLine = true,
-                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                            Icon(
-                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Hiện/ẩn key"
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
+                if (settings.isUsingProxy) {
+                    Surface(
+                        color = NormalGreenBg,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "✅ Đang kết nối máy chủ AI Cloudflare Proxy (không lộ khóa API, mọi người tải app là dùng ngay).",
+                            color = NormalGreen,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
                 Text(
                     "Chọn model Gemini 4 / 3.8 (mặc định gemini-4-hydrogen nhanh & chính xác)",
                     style = MaterialTheme.typography.labelMedium,
@@ -456,9 +460,46 @@ fun SyncAndOtaScreen(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = proxyUrlInput,
+                    onValueChange = { proxyUrlInput = it },
+                    label = { Text("Cloudflare Worker Proxy URL (dùng chung cho nhiều người)") },
+                    placeholder = { Text("https://hieudon-gemini-proxy.xxx.workers.dev") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = proxyTokenInput,
+                    onValueChange = { proxyTokenInput = it },
+                    label = { Text("Mã bảo vệ Proxy (APP_CLIENT_TOKEN — tuỳ chọn)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = apiKeyInput,
+                    onValueChange = { apiKeyInput = it },
+                    label = { Text("Hoặc Gemini API Key cá nhân (để trống để dùng Proxy)") },
+                    placeholder = { Text("AIzaSy...") },
+                    singleLine = true,
+                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showApiKey = !showApiKey }) {
+                            Icon(
+                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Hiện/ẩn key"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(Modifier.height(10.dp))
                 Button(
-                    onClick = { onSaveGeminiConfig(apiKeyInput, selectedModel) },
+                    onClick = { onSaveGeminiConfig(apiKeyInput, proxyUrlInput, proxyTokenInput, selectedModel) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Lưu cấu hình Gemini")

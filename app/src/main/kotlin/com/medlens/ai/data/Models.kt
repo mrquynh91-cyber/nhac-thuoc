@@ -192,6 +192,8 @@ data class MedicationIntakeLog(
 @Serializable
 data class AppSettings(
     val geminiApiKey: String = "",
+    val geminiProxyUrl: String = "",
+    val geminiProxyToken: String = "",
     val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val githubOtaRepo: String = "",
     val githubOtaToken: String = "",
@@ -204,6 +206,12 @@ data class AppSettings(
     val lastSyncedAt: Long = 0L,
     val activeProfileId: String = FamilyProfile.DEFAULT_SELF_ID
 ) {
+    val hasAiReady: Boolean
+        get() = geminiProxyUrl.isNotBlank() || geminiApiKey.isNotBlank()
+
+    val isUsingProxy: Boolean
+        get() = geminiApiKey.isBlank() && geminiProxyUrl.isNotBlank()
+
     fun timeForSlot(slot: DaySlot): String = when (slot) {
         DaySlot.MORNING -> morningTime
         DaySlot.NOON -> noonTime

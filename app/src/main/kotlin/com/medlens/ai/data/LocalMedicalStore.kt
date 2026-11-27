@@ -87,6 +87,8 @@ class LocalMedicalStore(private val context: Context) {
 
     private fun loadSettings(): AppSettings {
         val savedGeminiKey = prefs.getString(KEY_GEMINI_API_KEY, "")?.trim().orEmpty()
+        val savedProxyUrl = prefs.getString(KEY_GEMINI_PROXY_URL, "")?.trim().orEmpty()
+        val savedProxyToken = prefs.getString(KEY_GEMINI_PROXY_TOKEN, "")?.trim().orEmpty()
         val savedGithubRepo = prefs.getString(KEY_GITHUB_OTA_REPO, "")?.trim().orEmpty()
         val savedGithubToken = prefs.getString(KEY_GITHUB_OTA_TOKEN, "")?.trim().orEmpty()
         val savedModel = prefs.getString(KEY_GEMINI_MODEL, AppSettings.DEFAULT_GEMINI_MODEL)
@@ -99,6 +101,8 @@ class LocalMedicalStore(private val context: Context) {
         }
         return AppSettings(
             geminiApiKey = savedGeminiKey.ifEmpty { BuildConfig.GEMINI_API_KEY },
+            geminiProxyUrl = savedProxyUrl.ifEmpty { BuildConfig.GEMINI_PROXY_URL },
+            geminiProxyToken = savedProxyToken.ifEmpty { BuildConfig.GEMINI_PROXY_TOKEN },
             geminiModel = resolvedModel,
             githubOtaRepo = savedGithubRepo.ifEmpty { BuildConfig.GITHUB_OTA_REPO },
             githubOtaToken = savedGithubToken.ifEmpty { BuildConfig.GITHUB_OTA_TOKEN },
@@ -118,6 +122,8 @@ class LocalMedicalStore(private val context: Context) {
         val updated = transform(_settings.value)
         prefs.edit()
             .putString(KEY_GEMINI_API_KEY, updated.geminiApiKey.trim())
+            .putString(KEY_GEMINI_PROXY_URL, updated.geminiProxyUrl.trim())
+            .putString(KEY_GEMINI_PROXY_TOKEN, updated.geminiProxyToken.trim())
             .putString(KEY_GEMINI_MODEL, updated.geminiModel)
             .putString(KEY_GITHUB_OTA_REPO, updated.githubOtaRepo.trim())
             .putString(KEY_GITHUB_OTA_TOKEN, updated.githubOtaToken.trim())
@@ -351,6 +357,8 @@ class LocalMedicalStore(private val context: Context) {
 
     companion object {
         private const val KEY_GEMINI_API_KEY = "gemini_api_key"
+        private const val KEY_GEMINI_PROXY_URL = "gemini_proxy_url"
+        private const val KEY_GEMINI_PROXY_TOKEN = "gemini_proxy_token"
         private const val KEY_GEMINI_MODEL = "gemini_model"
         private const val KEY_GITHUB_OTA_REPO = "github_ota_repo"
         private const val KEY_GITHUB_OTA_TOKEN = "github_ota_token"

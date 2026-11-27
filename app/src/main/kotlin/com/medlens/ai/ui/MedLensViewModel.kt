@@ -11,6 +11,7 @@ import com.medlens.ai.data.CloudSyncUiState
 import com.medlens.ai.data.DaySlot
 import com.medlens.ai.data.DocumentType
 import com.medlens.ai.data.FamilyProfile
+import com.medlens.ai.data.GeminiEndpointConfig
 import com.medlens.ai.data.IndicatorTrendSeries
 import com.medlens.ai.data.IntakeStatus
 import com.medlens.ai.data.LocalMedicalStore
@@ -207,6 +208,15 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         _snackbarMessage.value = msg
     }
 
+    private fun currentGeminiEndpoint(): GeminiEndpointConfig {
+        val cfg = settings.value
+        return GeminiEndpointConfig(
+            apiKey = cfg.geminiApiKey,
+            proxyUrl = cfg.geminiProxyUrl,
+            proxyToken = cfg.geminiProxyToken
+        )
+    }
+
     fun analyzeAttachments(attachments: List<ScanAttachment>, mode: DocumentType) {
         if (_isAnalyzing.value) return
         viewModelScope.launch {
@@ -218,7 +228,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 attachments = attachments,
                 profileId = currentProfile.id,
                 profileContext = currentProfile,
-                apiKey = cfg.geminiApiKey,
+                endpoint = currentGeminiEndpoint(),
                 modelName = cfg.geminiModel,
                 hintType = mode,
                 onModelAutoSwitched = { workingModel ->
@@ -252,7 +262,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 record = updatedWithUser,
                 profile = profile,
                 question = clean,
-                apiKey = cfg.geminiApiKey,
+                endpoint = currentGeminiEndpoint(),
                 modelName = cfg.geminiModel,
                 onModelAutoSwitched = { workingModel ->
                     localStore.updateSettings { it.copy(geminiModel = workingModel) }
@@ -297,7 +307,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 focusedRecord = focusedRecord,
                 chatHistory = previousHistory,
                 question = clean,
-                apiKey = cfg.geminiApiKey,
+                endpoint = currentGeminiEndpoint(),
                 modelName = cfg.geminiModel,
                 onModelAutoSwitched = { workingModel ->
                     localStore.updateSettings { it.copy(geminiModel = workingModel) }
@@ -337,7 +347,7 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 activeReminders = activeProfileReminders.value.filter { it.isActive },
                 focusedRecord = focusedRecord,
                 chatHistory = previousHistory,
-                apiKey = cfg.geminiApiKey,
+                endpoint = currentGeminiEndpoint(),
                 modelName = cfg.geminiModel,
                 onModelAutoSwitched = { workingModel ->
                     localStore.updateSettings { it.copy(geminiModel = workingModel) }
@@ -511,9 +521,14 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         _snackbarMessage.value = "Đã lưu giờ uống thuốc mặc định (Sáng $morning • Trưa $noon • Chiều $afternoon • Tối $evening)."
     }
 
-    fun saveGeminiConfig(apiKey: String, model: String) {
+    fun saveGeminiConfig(apiKey: String, proxyUrl: String, proxyToken: String, model: String) {
         localStore.updateSettings {
-            it.copy(geminiApiKey = apiKey.trim(), geminiModel = model)
+            it.copy(
+                geminiApiKey = apiKey.trim(),
+                geminiProxyUrl = proxyUrl.trim(),
+                geminiProxyToken = proxyToken.trim(),
+                geminiModel = model
+            )
         }
         _snackbarMessage.value = "Đã lưu cấu hình Gemini AI ($model)."
     }

@@ -40,6 +40,19 @@ data class VoiceChatResult(
     val reply: String
 )
 
+data class GeminiEndpointConfig(
+    val apiKey: String = "",
+    val proxyUrl: String = "",
+    val proxyToken: String = ""
+) {
+    val cleanApiKey: String get() = apiKey.replace(Regex("\\s+"), "")
+    val cleanProxyUrl: String get() = proxyUrl.trim().trimEnd('/')
+    val cleanProxyToken: String get() = proxyToken.trim()
+
+    val useProxy: Boolean get() = cleanApiKey.isEmpty() && cleanProxyUrl.isNotEmpty()
+    val isReady: Boolean get() = cleanApiKey.isNotEmpty() || cleanProxyUrl.isNotEmpty()
+}
+
 class GeminiRepository(
     private val context: Context,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -58,19 +71,18 @@ class GeminiRepository(
         attachments: List<ScanAttachment>,
         profileId: String,
         profileContext: FamilyProfile?,
-        apiKey: String,
+        endpoint: GeminiEndpointConfig,
         modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
         hintType: DocumentType = DocumentType.LAB_RESULT,
         onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<MedicalRecord> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.replace(Regex("\\s+"), "")
         if (attachments.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Vui lòng chụp ảnh hoặc chọn ít nhất 1 ảnh / file PDF."))
         }
-        if (cleanKey.isEmpty()) {
+        if (!endpoint.isReady) {
             return@withContext Result.failure(
                 IllegalStateException(
-                    "Chưa có Gemini API Key. Vui lòng vào tab Cài đặt để nhập khóa API Gemini, hoặc bấm nút Xem dữ liệu mẫu."
+                    "Chưa cấu hình máy chủ AI hoặc Gemini API Key. Vui lòng vào tab Cài đặt hoặc bấm Xem dữ liệu mẫu."
                 )
             )
         }
@@ -85,7 +97,7 @@ class GeminiRepository(
 
             val responseBody = executeGenerateContentWithAutoFallback(
                 preferredModel = modelName,
-                apiKey = cleanKey,
+                endpoint = endpoint,
                 requestJson = requestJson,
                 onModelAutoSwitched = onModelAutoSwitched
             )
@@ -105,7 +117,7 @@ class GeminiRepository(
         record: MedicalRecord,
         profile: FamilyProfile?,
         question: String,
-        apiKey: String,
+        endpoint: GeminiEndpointConfig,
         modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
         onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -114,8 +126,7 @@ class GeminiRepository(
             return@withContext Result.failure(IllegalArgumentException("Vui lòng nhập hoặc nói câu hỏi."))
         }
 
-        val cleanKey = apiKey.replace(Regex("\\s+"), "")
-        if (cleanKey.isEmpty()) {
+        if (!endpoint.isReady) {
             return@withContext Result.success(buildOfflineHelpfulReply(record, profile, cleanQuestion))
         }
 
@@ -170,7 +181,7 @@ class GeminiRepository(
 
             val responseBody = executeGenerateContentWithAutoFallback(
                 preferredModel = modelName,
-                apiKey = cleanKey,
+                endpoint = endpoint,
                 requestJson = root.toString(),
                 onModelAutoSwitched = onModelAutoSwitched
             )
@@ -185,7 +196,7 @@ class GeminiRepository(
         focusedRecord: MedicalRecord?,
         chatHistory: List<RecordChatMessage>,
         question: String,
-        apiKey: String,
+        endpoint: GeminiEndpointConfig,
         modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
         onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -194,12 +205,11 @@ class GeminiRepository(
             return@withContext Result.failure(IllegalArgumentException("Vui lòng nhập hoặc nói câu hỏi."))
         }
 
-        val cleanKey = apiKey.replace(Regex("\\s+"), "")
-        if (cleanKey.isEmpty()) {
+        if (!endpoint.isReady) {
             val fallback = if (focusedRecord != null) {
                 buildOfflineHelpfulReply(focusedRecord, profile, cleanQuestion)
             } else {
-                "Mình đã nhận câu hỏi của bạn cho hồ sơ **${profile.name}**. Hiện chưa có Gemini API Key trong tab Cài đặt nên chưa thể kết nối Gemini AI trực tiếp.\n\nBạn hãy vào **Cài đặt → Tích hợp AI Gemini** để dán API Key miễn phí, sau đó quay lại đây hỏi chi tiết về đơn thuốc, chỉ số xét nghiệm, tương tác thuốc và chế độ ăn uống nhé!"
+                "Mình đã nhận câu hỏi của bạn cho hồ sơ **${profile.name}**. Hiện chưa có kết nối máy chủ AI hoặc Gemini API Key trong tab Cài đặt.\n\nBạn hãy vào **Cài đặt → Tích hợp AI Gemini** để kết nối, sau đó quay lại đây hỏi chi tiết nhé!"
             }
             return@withContext Result.success(fallback)
         }
@@ -287,7 +297,7 @@ class GeminiRepository(
 
             val responseBody = executeGenerateContentWithAutoFallback(
                 preferredModel = modelName,
-                apiKey = cleanKey,
+                endpoint = endpoint,
                 requestJson = root.toString(),
                 onModelAutoSwitched = onModelAutoSwitched
             )
@@ -302,14 +312,13 @@ class GeminiRepository(
         activeReminders: List<MedicationReminder>,
         focusedRecord: MedicalRecord?,
         chatHistory: List<RecordChatMessage>,
-        apiKey: String,
+        endpoint: GeminiEndpointConfig,
         modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
         onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<VoiceChatResult> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.replace(Regex("\\s+"), "")
-        if (cleanKey.isEmpty()) {
+        if (!endpoint.isReady) {
             return@withContext Result.failure(
-                IllegalStateException("Chưa có Gemini API Key. Vui lòng nhập khóa API trong tab Cài đặt để dùng hỏi đáp giọng nói.")
+                IllegalStateException("Chưa cấu hình máy chủ AI hoặc Gemini API Key trong tab Cài đặt.")
             )
         }
 
@@ -399,7 +408,7 @@ class GeminiRepository(
 
             val responseBody = executeGenerateContentWithAutoFallback(
                 preferredModel = modelName,
-                apiKey = cleanKey,
+                endpoint = endpoint,
                 requestJson = root.toString(),
                 onModelAutoSwitched = onModelAutoSwitched
             )
@@ -418,26 +427,25 @@ class GeminiRepository(
 
     private fun executeGenerateContentWithAutoFallback(
         preferredModel: String,
-        apiKey: String,
+        endpoint: GeminiEndpointConfig,
         requestJson: String,
         onModelAutoSwitched: ((String) -> Unit)?
     ): String {
         val primary = normalizeModelId(preferredModel).ifEmpty { AppSettings.DEFAULT_GEMINI_MODEL }
-        val firstAttempt = postGenerateContent(primary, apiKey, requestJson)
+        val firstAttempt = postGenerateContent(primary, endpoint, requestJson)
         if (firstAttempt.isSuccess) return firstAttempt.body
 
         val isRetriableOverload = firstAttempt.code == 503 || firstAttempt.code == 429 || firstAttempt.code == 500
         val isModelNotFound = firstAttempt.code == 404
 
         if (isModelNotFound || isRetriableOverload) {
-            // Brief retry on same model once for transient 503 spikes before failing over
             if (isRetriableOverload) {
                 runCatching { Thread.sleep(500) }
-                val quickRetry = postGenerateContent(primary, apiKey, requestJson)
+                val quickRetry = postGenerateContent(primary, endpoint, requestJson)
                 if (quickRetry.isSuccess) return quickRetry.body
             }
 
-            val discovered = if (isModelNotFound) discoverAvailableGeminiModels(apiKey) else emptyList()
+            val discovered = if (isModelNotFound) discoverAvailableGeminiModels(endpoint) else emptyList()
             val fallbackCandidates = (discovered + listOf(
                 "gemini-4-hydrogen",
                 "gemini-3.8-flash",
@@ -452,10 +460,8 @@ class GeminiRepository(
 
             var lastError = firstAttempt
             for (candidate in fallbackCandidates.take(5)) {
-                val retry = postGenerateContent(candidate, apiKey, requestJson)
+                val retry = postGenerateContent(candidate, endpoint, requestJson)
                 if (retry.isSuccess) {
-                    // Only permanently switch saved model if the original returned 404;
-                    // on temporary 503/429 overload, keep the user's preferred model intact!
                     if (isModelNotFound) {
                         onModelAutoSwitched?.invoke(candidate)
                     }
@@ -477,15 +483,30 @@ class GeminiRepository(
         val body: String
     )
 
-    private fun postGenerateContent(modelId: String, apiKey: String, requestJson: String): RawApiAttempt {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent"
-        val request = Request.Builder()
-            .url(endpoint)
-            .header("x-goog-api-key", apiKey)
+    private fun postGenerateContent(
+        modelId: String,
+        endpoint: GeminiEndpointConfig,
+        requestJson: String
+    ): RawApiAttempt {
+        val baseUrl = if (endpoint.useProxy) {
+            endpoint.cleanProxyUrl
+        } else {
+            "https://generativelanguage.googleapis.com"
+        }
+        val url = "$baseUrl/v1beta/models/$modelId:generateContent"
+        val reqBuilder = Request.Builder()
+            .url(url)
             .post(requestJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
 
-        return httpClient.newCall(request).execute().use { response ->
+        if (endpoint.useProxy) {
+            if (endpoint.cleanProxyToken.isNotEmpty()) {
+                reqBuilder.header("x-hieudon-token", endpoint.cleanProxyToken)
+            }
+        } else {
+            reqBuilder.header("x-goog-api-key", endpoint.cleanApiKey)
+        }
+
+        return httpClient.newCall(reqBuilder.build()).execute().use { response ->
             RawApiAttempt(
                 model = modelId,
                 code = response.code,
@@ -495,15 +516,26 @@ class GeminiRepository(
         }
     }
 
-    private fun discoverAvailableGeminiModels(apiKey: String): List<String> {
+    private fun discoverAvailableGeminiModels(endpoint: GeminiEndpointConfig): List<String> {
         return runCatching {
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100")
-                .header("x-goog-api-key", apiKey)
+            val baseUrl = if (endpoint.useProxy) {
+                endpoint.cleanProxyUrl
+            } else {
+                "https://generativelanguage.googleapis.com"
+            }
+            val reqBuilder = Request.Builder()
+                .url("$baseUrl/v1beta/models?pageSize=100")
                 .get()
-                .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            if (endpoint.useProxy) {
+                if (endpoint.cleanProxyToken.isNotEmpty()) {
+                    reqBuilder.header("x-hieudon-token", endpoint.cleanProxyToken)
+                }
+            } else {
+                reqBuilder.header("x-goog-api-key", endpoint.cleanApiKey)
+            }
+
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) return@runCatching emptyList()
                 val body = response.body?.string().orEmpty()
                 val root = json.parseToJsonElement(body).jsonObject

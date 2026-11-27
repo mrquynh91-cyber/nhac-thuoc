@@ -171,7 +171,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
 
                 MainTab.SCAN -> ScanScreen(
                     activeProfile = activeProfile,
-                    hasGeminiApiKey = settings.geminiApiKey.isNotBlank(),
+                    hasGeminiApiKey = settings.hasAiReady,
                     geminiModel = settings.geminiModel,
                     isAnalyzing = isAnalyzing,
                     analysisError = analysisError,
@@ -198,7 +198,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     profileRecords = activeRecords,
                     messages = activeAssistantChat,
                     geminiModel = settings.geminiModel,
-                    hasGeminiApiKey = settings.geminiApiKey.isNotBlank(),
+                    hasGeminiApiKey = settings.hasAiReady,
                     isReplying = isAssistantReplying,
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
                     onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
@@ -219,7 +219,9 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     onToggleReminder = { vm.toggleReminderActive(it) },
                     onDeleteReminder = { vm.deleteReminder(it) },
                     onSendTestNotification = { vm.sendTestNotification() },
-                    onSaveGeminiConfig = { key, model -> vm.saveGeminiConfig(key, model) },
+                    onSaveGeminiConfig = { key, proxy, token, model ->
+                        vm.saveGeminiConfig(key, proxy, token, model)
+                    },
                     onSaveOtaConfig = { repo, token, auto -> vm.saveOtaConfig(repo, token, auto) },
                     onToggleAutoSync = { vm.toggleAutoSync(it) },
                     onSignInFirebase = { email, pass -> vm.signInFirebase(email, pass) },
