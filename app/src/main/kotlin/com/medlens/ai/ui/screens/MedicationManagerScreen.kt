@@ -5,8 +5,11 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -68,7 +71,7 @@ import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
 import com.medlens.ai.ui.theme.WarningAmberBg
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MedicationManagerScreen(
     activeProfile: FamilyProfile,
@@ -243,10 +246,22 @@ fun MedicationManagerScreen(
                                         style = MaterialTheme.typography.titleMedium
                                     )
                                     Text(
-                                        text = "${reminder.dosage} • ${reminder.mealTiming.labelVi}",
+                                        text = listOfNotNull(
+                                            reminder.dosage,
+                                            reminder.frequency.takeIf { it.isNotBlank() },
+                                            reminder.mealTiming.labelVi
+                                        ).joinToString(" • "),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MutedText
                                     )
+                                    reminder.courseProgressSummary()?.let { progress ->
+                                        Text(
+                                            text = progress,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TealPrimary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                                 Switch(
                                     checked = reminder.isActive,
@@ -255,7 +270,10 @@ fun MedicationManagerScreen(
                             }
 
                             Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 reminder.times.forEach { t ->
                                     Surface(color = InfoBlueBg, shape = RoundedCornerShape(8.dp)) {
                                         Text(
@@ -266,6 +284,24 @@ fun MedicationManagerScreen(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                         )
                                     }
+                                }
+                                Surface(
+                                    color = if (reminder.notifyTelegram) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable {
+                                        onSaveReminder(reminder.copy(notifyTelegram = !reminder.notifyTelegram))
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (reminder.notifyTelegram) "Telegram: Bật" else "Telegram: Tắt",
+                                        color = if (reminder.notifyTelegram) TealPrimary else MutedText,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
                                 }
                             }
 

@@ -815,15 +815,16 @@ class GeminiRepository(
                 {
                   "name": "Tên thuốc (hoặc ghi kèm [Chữ mờ, cần xác nhận lại với nhà thuốc/bác sĩ] nếu không rõ)",
                   "activeIngredient": "Hoạt chất chính",
-                  "categoryShort": "Công dụng ngắn gọn (vd: Bảo vệ dạ dày, Hạ mỡ máu, Kháng sinh)",
-                  "dosage": "Liều mỗi lần (vd: 1 viên)",
-                  "frequency": "Tần suất (vd: Ngày 2 lần Sáng, Tối)",
+                  "categoryShort": "Công dụng ngắn gọn (vd: Kháng virus viêm gan B, Bảo vệ dạ dày, Hạ mỡ máu)",
+                  "dosage": "Liều mỗi lần chính xác theo đơn/nhãn (vd: 1 viên)",
+                  "frequency": "Tần suất chỉ định chính xác (vd: 1 ngày 1 viên, hoặc Ngày 2 lần Sáng-Tối)",
                   "mealTiming": "BEFORE_MEAL | AFTER_MEAL | WITH_MEAL | ANYTIME",
                   "daySlots": ["MORNING", "EVENING"],
-                  "durationDays": 7,
+                  "durationDays": 30,
+                  "totalQuantity": "Tổng số viên/gói trong lọ hoặc đơn nếu thấy trên nhãn (vd: 30 viên / 1 lọ — hết lọ sau 30 ngày), hoặc chuỗi rỗng",
                   "purposePlainVietnamese": "Giải thích công dụng bằng ngôn ngữ đời thường",
-                  "sideEffectsWarning": "Cảnh báo an toàn (buồn ngủ, tránh rượu bia, cách bữa ăn...)",
-                  "suggestedReminderTimes": ["07:00", "19:30"]
+                  "sideEffectsWarning": "Cảnh báo an toàn (buồn ngủ, tránh rượu bia, uống đúng giờ, không bỏ liều...)",
+                  "suggestedReminderTimes": ["08:00"]
                 }
               ],
               "generalDietAdvice": ["Lời khuyên ăn uống/sinh hoạt an toàn 1", "Lời khuyên 2"],
@@ -1012,6 +1013,7 @@ internal data class GeminiMedicationDto(
     val mealTiming: String = "AFTER_MEAL",
     val daySlots: List<String> = emptyList(),
     val durationDays: Int = 7,
+    val totalQuantity: String = "",
     val purposePlainVietnamese: String = "",
     val sideEffectsWarning: String = "",
     val suggestedReminderTimes: List<String> = emptyList()
@@ -1038,6 +1040,7 @@ internal data class GeminiMedicationDto(
             mealTiming = parsedMeal,
             daySlots = parsedSlots,
             durationDays = durationDays.coerceIn(1, 365),
+            totalQuantity = totalQuantity.trim(),
             purposePlainVietnamese = purposePlainVietnamese.trim(),
             sideEffectsWarning = sideEffectsWarning.trim(),
             suggestedReminderTimes = validTimes

@@ -425,10 +425,22 @@ fun SyncAndOtaScreen(
                                                 style = MaterialTheme.typography.titleSmall
                                             )
                                             Text(
-                                                text = "${reminder.dosage} • ${reminder.mealTiming.labelVi} • ${reminder.times.joinToString(", ")}",
+                                                text = listOfNotNull(
+                                                    reminder.dosage,
+                                                    reminder.mealTiming.labelVi,
+                                                    reminder.times.joinToString(", "),
+                                                    if (reminder.notifyTelegram) "Telegram: Bật" else "Telegram: Tắt"
+                                                ).joinToString(" • "),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MutedText
                                             )
+                                            reminder.courseProgressSummary()?.let { progress ->
+                                                Text(
+                                                    text = progress,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = TealPrimary
+                                                )
+                                            }
                                         }
                                         Switch(
                                             checked = reminder.isActive,

@@ -1,6 +1,8 @@
 package com.medlens.ai.data
 
 import kotlinx.serialization.Serializable
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Serializable
@@ -119,6 +121,7 @@ data class MedicationItem(
     val mealTiming: MealTiming = MealTiming.AFTER_MEAL,
     val daySlots: List<DaySlot> = listOf(DaySlot.MORNING, DaySlot.EVENING),
     val durationDays: Int = 7,
+    val totalQuantity: String = "", // vd: 30 viên (1 lọ) — uống 30 ngày là hết lọ
     val purposePlainVietnamese: String = "",
     val sideEffectsWarning: String = "",
     val suggestedReminderTimes: List<String> = listOf("07:00", "19:30")
@@ -168,14 +171,38 @@ data class MedicationReminder(
     val profileId: String = FamilyProfile.DEFAULT_SELF_ID,
     val medicationName: String,
     val dosage: String,
+    val frequency: String = "",
     val mealTiming: MealTiming = MealTiming.AFTER_MEAL,
     val times: List<String> = listOf("07:00", "19:30"),
+    val durationDays: Int = 0, // 0 = không giới hạn số ngày
+    val totalQuantity: String = "", // vd: 30 viên (1 lọ)
+    val startDateKey: String = "", // yyyy-MM-dd
+    val notifyTelegram: Boolean = true,
     val note: String = "",
     val sourceRecordId: String? = null,
     val isActive: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
-)
+) {
+    fun courseProgressSummary(today: LocalDate = LocalDate.now()): String? {
+        val qty = totalQuantity.trim()
+        if (durationDays <= 0) {
+            return qty.takeIf { it.isNotBlank() }?.let { "Quy cách: $it" }
+        }
+        val start = runCatching {
+            if (startDateKey.isNotBlank()) LocalDate.parse(startDateKey) else today
+        }.getOrDefault(today)
+        val elapsedDays = ChronoUnit.DAYS.between(start, today).toInt().coerceAtLeast(0)
+        val currentDay = (elapsedDays + 1).coerceAtMost(durationDays)
+        val remaining = (durationDays - elapsedDays).coerceAtLeast(0)
+        val qtySuffix = if (qty.isNotBlank()) " • $qty" else ""
+        return when {
+            remaining <= 0 -> "Đã hết liệu trình $durationDays ngày$qtySuffix"
+            remaining <= 3 -> "⚠️ Sắp hết thuốc (còn $remaining/$durationDays ngày)$qtySuffix"
+            else -> "Ngày $currentDay/$durationDays (còn $remaining ngày)$qtySuffix"
+        }
+    }
+}
 
 @Serializable
 data class MedicationIntakeLog(

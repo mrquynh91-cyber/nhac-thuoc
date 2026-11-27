@@ -381,6 +381,15 @@ fun HomeScreen(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MutedText
                                         )
+                                        dose.reminder.courseProgressSummary()?.let { progress ->
+                                            Text(
+                                                text = progress,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TealPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                     if (isTaken) {
                                         Icon(

@@ -122,14 +122,15 @@ object TelegramNotifier {
         if (!settings.telegramEnabled || !settings.telegramNotifyOnDue || !settings.hasTelegramConfigured) {
             return Result.success("skipped")
         }
-        if (reminders.isEmpty()) return Result.success("empty")
+        val eligible = reminders.filter { it.notifyTelegram }
+        if (eligible.isEmpty()) return Result.success("disabled_for_meds")
 
-        val profileNames = reminders
+        val profileNames = eligible
             .mapNotNull { profileMap[it.profileId]?.name }
             .distinct()
             .joinToString(", ")
 
-        val grouped = reminders
+        val grouped = eligible
             .groupBy { it.mealTiming }
             .entries
             .sortedBy { MedicationNotificationHelper.mealOrder(it.key) }
@@ -141,21 +142,25 @@ object TelegramNotifier {
                 appendLine("⏰ <b>ĐẾN GIỜ UỐNG THUỐC • ${escapeHtml(scheduledTime)}</b>")
             }
             if (profileNames.isNotBlank()) {
-                appendLine("👤 Hồ sơ: <b>${escapeHtml(profileNames)}</b> (${reminders.size} loại thuốc)")
+                appendLine("👤 Hồ sơ: <b>${escapeHtml(profileNames)}</b> (${eligible.size} loại thuốc)")
             } else {
-                appendLine("💊 Tổng cộng: <b>${reminders.size} loại thuốc</b>")
+                appendLine("💊 Tổng cộng: <b>${eligible.size} loại thuốc</b>")
             }
             appendLine()
 
             grouped.forEachIndexed { idx, (timing, meds) ->
                 appendLine("<b>${idx + 1}. ${escapeHtml(timing.labelVi.uppercase(Locale.getDefault()))}</b>")
                 meds.forEach { med ->
-                    val memberTag = if (reminders.map { it.profileId }.distinct().size > 1) {
+                    val memberTag = if (eligible.map { it.profileId }.distinct().size > 1) {
                         profileMap[med.profileId]?.name?.let { " [${escapeHtml(it)}]" }.orEmpty()
                     } else {
                         ""
                     }
-                    appendLine("• <b>${escapeHtml(med.medicationName)}</b> — ${escapeHtml(med.dosage)}$memberTag")
+                    val freqTag = med.frequency.takeIf { it.isNotBlank() }?.let { " • ${escapeHtml(it)}" }.orEmpty()
+                    appendLine("• <b>${escapeHtml(med.medicationName)}</b> — ${escapeHtml(med.dosage)}$freqTag$memberTag")
+                    med.courseProgressSummary()?.let { progress ->
+                        appendLine("  <i>📦 ${escapeHtml(progress)}</i>")
+                    }
                     if (med.note.isNotBlank()) {
                         appendLine("  <i>↳ ${escapeHtml(med.note.take(140))}</i>")
                     }
@@ -177,10 +182,11 @@ object TelegramNotifier {
         if (!settings.telegramEnabled || !settings.telegramNotifyOnTaken || !settings.hasTelegramConfigured) {
             return Result.success("skipped")
         }
-        if (takenReminders.isEmpty()) return Result.success("empty")
+        val eligible = takenReminders.filter { it.notifyTelegram }
+        if (eligible.isEmpty()) return Result.success("disabled_for_meds")
 
         val nowStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val profileNames = takenReminders
+        val profileNames = eligible
             .mapNotNull { profileMap[it.profileId]?.name }
             .distinct()
             .joinToString(", ")
@@ -192,8 +198,9 @@ object TelegramNotifier {
             }
             appendLine("🕒 Xác nhận lúc: <b>$nowStr</b>")
             appendLine()
-            takenReminders.forEach { med ->
-                appendLine("• <b>${escapeHtml(med.medicationName)}</b> (${escapeHtml(med.dosage)} — ${escapeHtml(med.mealTiming.labelVi)})")
+            eligible.forEach { med ->
+                val progressTag = med.courseProgressSummary()?.let { " — ${escapeHtml(it)}" }.orEmpty()
+                appendLine("• <b>${escapeHtml(med.medicationName)}</b> (${escapeHtml(med.dosage)} — ${escapeHtml(med.mealTiming.labelVi)})$progressTag")
             }
         }
 
@@ -211,9 +218,11 @@ object TelegramNotifier {
         if (!settings.telegramEnabled || !settings.telegramNotifyOnSnoozeOrSkip || !settings.hasTelegramConfigured) {
             return Result.success("skipped")
         }
+        val eligible = reminders.filter { it.notifyTelegram }
+        if (reminders.isNotEmpty() && eligible.isEmpty()) return Result.success("disabled_for_meds")
 
         val nowStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val profileNames = reminders
+        val profileNames = eligible
             .mapNotNull { profileMap[it.profileId]?.name }
             .distinct()
             .joinToString(", ")
@@ -228,12 +237,12 @@ object TelegramNotifier {
                 appendLine("👤 Hồ sơ: <b>${escapeHtml(profileNames)}</b>")
             }
             appendLine("🕒 Thời điểm: $nowStr")
-            if (reminders.isNotEmpty()) {
+            if (eligible.isNotEmpty()) {
                 appendLine(
                     if (isSnooze) "📌 Chưa uống các thuốc sau, cả nhà nhớ nhắc nhé:"
                     else "📌 Thuốc vừa bị bỏ qua:"
                 )
-                reminders.forEach { med ->
+                eligible.forEach { med ->
                     appendLine("• <b>${escapeHtml(med.medicationName)}</b> (${escapeHtml(med.dosage)} — ${escapeHtml(med.mealTiming.labelVi)})")
                 }
             }

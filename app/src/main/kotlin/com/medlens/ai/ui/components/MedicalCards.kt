@@ -297,11 +297,17 @@ fun MedicationCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 InfoChip(text = "Liều: ${medication.dosage}")
+                if (medication.frequency.isNotBlank()) {
+                    InfoChip(text = medication.frequency)
+                }
                 InfoChip(text = existingReminder?.mealTiming?.labelVi ?: medication.mealTiming.labelVi)
                 if (medication.daySlots.isNotEmpty()) {
                     InfoChip(text = "Buổi: ${medication.daySlots.joinToString(" • ") { it.labelVi }}")
                 }
                 InfoChip(text = "${medication.durationDays} ngày")
+                if (medication.totalQuantity.isNotBlank()) {
+                    InfoChip(text = medication.totalQuantity)
+                }
             }
 
             if (medication.purposePlainVietnamese.isNotBlank()) {
@@ -380,9 +386,16 @@ fun MedicationCard(
                     }
                     Text(
                         text = if (existingReminder != null) {
-                            "${existingReminder.dosage} • ${existingReminder.mealTiming.labelVi}"
+                            val teleLabel = if (existingReminder.notifyTelegram) "Gửi Telegram" else "Tắt Telegram"
+                            val course = existingReminder.courseProgressSummary()
+                            listOfNotNull(
+                                "${existingReminder.dosage} • ${existingReminder.mealTiming.labelVi}",
+                                teleLabel,
+                                course
+                            ).joinToString(" • ")
                         } else {
-                            "Bấm để chọn giờ uống (9h, 10h...)"
+                            val freqHint = medication.frequency.takeIf { it.isNotBlank() }?.let { "$it • " }.orEmpty()
+                            "${freqHint}Bấm chọn giờ uống (9h, 10h...) & Telegram"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MutedText
@@ -951,8 +964,15 @@ fun RecordDetailScreen(
                                     profileId = record.profileId,
                                     medicationName = med.name,
                                     dosage = med.dosage.ifBlank { "Theo đơn" },
+                                    frequency = med.frequency.ifBlank {
+                                        if (med.daySlots.size == 1) "1 ngày 1 lần" else "Ngày ${med.daySlots.size} lần"
+                                    },
                                     mealTiming = med.mealTiming,
                                     times = med.suggestedReminderTimes.ifEmpty { listOf("09:00") },
+                                    durationDays = med.durationDays,
+                                    totalQuantity = med.totalQuantity,
+                                    startDateKey = LocalMedicalStore.todayDateKey(),
+                                    notifyTelegram = true,
                                     note = defaultNote,
                                     sourceRecordId = record.id,
                                     isActive = true
