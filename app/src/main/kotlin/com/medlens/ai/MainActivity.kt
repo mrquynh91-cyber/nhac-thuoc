@@ -82,6 +82,8 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val isChatReplying by vm.isChatReplying.collectAsState()
     val isAssistantReplying by vm.isAssistantReplying.collectAsState()
     val snackbarMsg by vm.snackbarMessage.collectAsState()
+    val isTelegramBusy by vm.isTelegramBusy.collectAsState()
+    val discoveredTelegramChats by vm.discoveredTelegramChats.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showMedicationManager by remember { mutableStateOf(false) }
@@ -238,11 +240,20 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     cloudSyncState = cloudSyncState,
                     otaState = otaState,
                     otaUpdater = vm.otaUpdater,
+                    isTelegramBusy = isTelegramBusy,
+                    discoveredTelegramChats = discoveredTelegramChats,
                     onSaveDefaultSlotTimes = { m, n, a, e -> vm.saveDefaultSlotTimes(m, n, a, e) },
                     onSaveReminder = { vm.saveReminder(it) },
                     onToggleReminder = { vm.toggleReminderActive(it) },
                     onDeleteReminder = { vm.deleteReminder(it) },
                     onSendTestNotification = { vm.sendTestNotification() },
+                    onSaveTelegramConfig = { enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip ->
+                        vm.saveTelegramConfig(enabled, botToken, chatId, groupName, onDue, onTaken, onSnoozeSkip)
+                    },
+                    onDiscoverTelegramGroups = { vm.discoverTelegramGroups(it) },
+                    onSendTelegramTest = { botToken, chatId, groupName ->
+                        vm.sendTelegramTestMessage(botToken, chatId, groupName)
+                    },
                     onSaveGeminiConfig = { key, proxy, token, model ->
                         vm.saveGeminiConfig(key, proxy, token, model)
                     },

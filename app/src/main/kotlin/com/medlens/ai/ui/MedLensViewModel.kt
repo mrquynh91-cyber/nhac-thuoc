@@ -27,6 +27,8 @@ import com.medlens.ai.data.TrendAnalyzer
 import com.medlens.ai.ota.OtaReleaseInfo
 import com.medlens.ai.ota.OtaUpdateState
 import com.medlens.ai.reminder.MedicationNotificationHelper
+import com.medlens.ai.reminder.TelegramDiscoveredChat
+import com.medlens.ai.reminder.TelegramNotifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -142,6 +144,12 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+
+    private val _isTelegramBusy = MutableStateFlow(false)
+    val isTelegramBusy: StateFlow<Boolean> = _isTelegramBusy.asStateFlow()
+
+    private val _discoveredTelegramChats = MutableStateFlow<List<TelegramDiscoveredChat>>(emptyList())
+    val discoveredTelegramChats: StateFlow<List<TelegramDiscoveredChat>> = _discoveredTelegramChats.asStateFlow()
 
     init {
         val cfg = settings.value
@@ -536,6 +544,31 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
             IntakeStatus.TAKEN -> "Đã đánh dấu uống ${dose.reminder.medicationName} lúc ${dose.scheduledTime}"
             IntakeStatus.SKIPPED -> "Đã đánh dấu bỏ qua cữ ${dose.scheduledTime}"
         }
+        val cfg = settings.value
+        if (cfg.telegramEnabled && cfg.hasTelegramConfigured) {
+            val profileMap = profiles.value.associateBy { it.id }
+            viewModelScope.launch {
+                when (status) {
+                    IntakeStatus.TAKEN -> if (cfg.telegramNotifyOnTaken) {
+                        TelegramNotifier.sendDoseTakenConfirmation(
+                            settings = cfg,
+                            scheduledTime = dose.scheduledTime,
+                            takenReminders = listOf(dose.reminder),
+                            profileMap = profileMap
+                        )
+                    }
+                    IntakeStatus.SKIPPED -> if (cfg.telegramNotifyOnSnoozeOrSkip) {
+                        TelegramNotifier.sendDoseSnoozedOrSkippedAlert(
+                            settings = cfg,
+                            scheduledTime = dose.scheduledTime,
+                            reminders = listOf(dose.reminder),
+                            profileMap = profileMap,
+                            isSnooze = false
+                        )
+                    }
+                }
+            }
+        }
         triggerAutoSyncIfReady()
     }
 
@@ -600,10 +633,95 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         )
         runCatching { app.startActivity(popupIntent) }
 
+        val cfg = settings.value
+        if (cfg.telegramEnabled && cfg.telegramNotifyOnDue && cfg.hasTelegramConfigured) {
+            val profileMap = profiles.value.associateBy { it.id }
+            viewModelScope.launch {
+                TelegramNotifier.sendDueMedicationReminder(
+                    settings = cfg,
+                    scheduledTime = targetSlot,
+                    reminders = medsToShow,
+                    profileMap = profileMap,
+                    isDemoTest = isDemo
+                )
+            }
+        }
+
         _snackbarMessage.value = if (posted) {
             "Đã mở Popup & gửi thông báo gom nhóm cữ $targetSlot (${medsToShow.size} thuốc)!"
         } else {
             "Đã mở Popup xem trước! Hãy cấp quyền Thông báo để nhận chuông khi tắt màn hình."
+        }
+    }
+
+    fun saveTelegramConfig(
+        enabled: Boolean,
+        botToken: String,
+        chatId: String,
+        groupName: String,
+        notifyOnDue: Boolean,
+        notifyOnTaken: Boolean,
+        notifyOnSnoozeOrSkip: Boolean
+    ) {
+        val cleanToken = botToken.trim()
+        val cleanChatId = chatId.trim()
+        if (enabled && (cleanToken.isBlank() || cleanChatId.isBlank())) {
+            _snackbarMessage.value = "Vui lòng nhập Bot Token và Chat ID nhóm (hoặc bấm 'Tự động tìm nhóm') trước khi bật."
+            return
+        }
+        localStore.updateSettings {
+            it.copy(
+                telegramEnabled = enabled,
+                telegramBotToken = cleanToken,
+                telegramChatId = cleanChatId,
+                telegramGroupName = groupName.trim(),
+                telegramNotifyOnDue = notifyOnDue,
+                telegramNotifyOnTaken = notifyOnTaken,
+                telegramNotifyOnSnoozeOrSkip = notifyOnSnoozeOrSkip
+            )
+        }
+        _snackbarMessage.value = if (enabled) {
+            "✅ Đã lưu & bật gửi nhắc nhở về nhóm Telegram (${groupName.ifBlank { cleanChatId }})!"
+        } else {
+            "Đã lưu cấu hình Telegram (đang tạm tắt)."
+        }
+    }
+
+    fun discoverTelegramGroups(botToken: String) {
+        if (_isTelegramBusy.value) return
+        viewModelScope.launch {
+            _isTelegramBusy.value = true
+            val result = TelegramNotifier.discoverGroups(botToken)
+            _isTelegramBusy.value = false
+            result.onSuccess { chats ->
+                _discoveredTelegramChats.value = chats
+                if (chats.size == 1) {
+                    val only = chats.first()
+                    _snackbarMessage.value = "✅ Đã tìm thấy nhóm: ${only.title} (${only.chatId})!"
+                } else {
+                    _snackbarMessage.value = "✅ Tìm thấy ${chats.size} nhóm/cuộc trò chuyện — hãy bấm chọn nhóm muốn gửi nhắc nhở!"
+                }
+            }.onFailure { err ->
+                _discoveredTelegramChats.value = emptyList()
+                _snackbarMessage.value = err.localizedMessage ?: "Không tìm thấy nhóm Telegram."
+            }
+        }
+    }
+
+    fun sendTelegramTestMessage(botToken: String, chatId: String, groupName: String) {
+        if (_isTelegramBusy.value) return
+        viewModelScope.launch {
+            _isTelegramBusy.value = true
+            val result = TelegramNotifier.sendTestMessage(botToken, chatId, groupName)
+            _isTelegramBusy.value = false
+            result.onSuccess { resolvedChatId ->
+                if (resolvedChatId != chatId.trim() && resolvedChatId.isNotBlank()) {
+                    localStore.updateSettings { it.copy(telegramChatId = resolvedChatId) }
+                }
+                _snackbarMessage.value = "✅ Đã gửi tin nhắn thử về nhóm Telegram thành công!"
+            }.onFailure { err ->
+                _snackbarMessage.value = err.localizedMessage ?: "Gửi tin thử Telegram thất bại."
+            }
         }
     }
 

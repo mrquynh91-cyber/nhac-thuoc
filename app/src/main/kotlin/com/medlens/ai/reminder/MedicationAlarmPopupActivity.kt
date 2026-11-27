@@ -66,6 +66,10 @@ import com.medlens.ai.ui.theme.TealDark
 import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
 import com.medlens.ai.ui.theme.WarningAmberBg
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class MedicationAlarmPopupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,17 +109,27 @@ class MedicationAlarmPopupActivity : ComponentActivity() {
                     isDemoTest = isDemoTest && realReminders.isEmpty(),
                     onConfirmTaken = { checkedIds ->
                         if (!(isDemoTest && realReminders.isEmpty())) {
-                            displayReminders
-                                .filter { checkedIds.contains(it.id) }
-                                .forEach { reminder ->
-                                    store.logMedicationIntake(
-                                        reminderId = reminder.id,
-                                        medicationName = reminder.medicationName,
+                            val takenList = displayReminders.filter { checkedIds.contains(it.id) }
+                            takenList.forEach { reminder ->
+                                store.logMedicationIntake(
+                                    reminderId = reminder.id,
+                                    medicationName = reminder.medicationName,
+                                    scheduledTime = scheduledTime,
+                                    status = IntakeStatus.TAKEN,
+                                    profileId = reminder.profileId
+                                )
+                            }
+                            val cfg = store.settings.value
+                            if (takenList.isNotEmpty() && cfg.telegramEnabled && cfg.telegramNotifyOnTaken && cfg.hasTelegramConfigured) {
+                                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                                    TelegramNotifier.sendDoseTakenConfirmation(
+                                        settings = cfg,
                                         scheduledTime = scheduledTime,
-                                        status = IntakeStatus.TAKEN,
-                                        profileId = reminder.profileId
+                                        takenReminders = takenList,
+                                        profileMap = profileMap
                                     )
                                 }
+                            }
                         }
                         if (notificationId != 0) {
                             NotificationManagerCompat.from(this).cancel(notificationId)
@@ -128,6 +142,19 @@ class MedicationAlarmPopupActivity : ComponentActivity() {
                                 scheduledTime = scheduledTime,
                                 delayMinutes = 15
                             )
+                            val cfg = store.settings.value
+                            if (cfg.telegramEnabled && cfg.telegramNotifyOnSnoozeOrSkip && cfg.hasTelegramConfigured) {
+                                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                                    TelegramNotifier.sendDoseSnoozedOrSkippedAlert(
+                                        settings = cfg,
+                                        scheduledTime = scheduledTime,
+                                        reminders = displayReminders,
+                                        profileMap = profileMap,
+                                        isSnooze = true,
+                                        delayMinutes = 15
+                                    )
+                                }
+                            }
                         }
                         if (notificationId != 0) {
                             NotificationManagerCompat.from(this).cancel(notificationId)

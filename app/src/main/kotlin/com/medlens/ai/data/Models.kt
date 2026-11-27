@@ -201,6 +201,13 @@ data class AppSettings(
     val noonTime: String = "12:00",
     val afternoonTime: String = "17:30",
     val eveningTime: String = "19:30",
+    val telegramEnabled: Boolean = false,
+    val telegramBotToken: String = "",
+    val telegramChatId: String = "",
+    val telegramGroupName: String = "",
+    val telegramNotifyOnDue: Boolean = true,
+    val telegramNotifyOnTaken: Boolean = true,
+    val telegramNotifyOnSnoozeOrSkip: Boolean = true,
     val autoSyncEnabled: Boolean = true,
     val autoCheckOta: Boolean = true,
     val lastSyncedAt: Long = 0L,
@@ -211,6 +218,9 @@ data class AppSettings(
 
     val isUsingProxy: Boolean
         get() = geminiApiKey.isBlank() && geminiProxyUrl.isNotBlank()
+
+    val hasTelegramConfigured: Boolean
+        get() = telegramBotToken.isNotBlank() && telegramChatId.isNotBlank()
 
     fun timeForSlot(slot: DaySlot): String = when (slot) {
         DaySlot.MORNING -> morningTime

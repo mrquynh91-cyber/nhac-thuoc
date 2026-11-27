@@ -130,6 +130,13 @@ class LocalMedicalStore(private val context: Context) {
             noonTime = prefs.getString(KEY_NOON_TIME, "12:00") ?: "12:00",
             afternoonTime = prefs.getString(KEY_AFTERNOON_TIME, "17:30") ?: "17:30",
             eveningTime = prefs.getString(KEY_EVENING_TIME, "19:30") ?: "19:30",
+            telegramEnabled = prefs.getBoolean(KEY_TELEGRAM_ENABLED, false),
+            telegramBotToken = prefs.getString(KEY_TELEGRAM_BOT_TOKEN, "")?.trim().orEmpty(),
+            telegramChatId = prefs.getString(KEY_TELEGRAM_CHAT_ID, "")?.trim().orEmpty(),
+            telegramGroupName = prefs.getString(KEY_TELEGRAM_GROUP_NAME, "")?.trim().orEmpty(),
+            telegramNotifyOnDue = prefs.getBoolean(KEY_TELEGRAM_NOTIFY_DUE, true),
+            telegramNotifyOnTaken = prefs.getBoolean(KEY_TELEGRAM_NOTIFY_TAKEN, true),
+            telegramNotifyOnSnoozeOrSkip = prefs.getBoolean(KEY_TELEGRAM_NOTIFY_SNOOZE_SKIP, true),
             autoSyncEnabled = prefs.getBoolean(KEY_AUTO_SYNC, true),
             autoCheckOta = prefs.getBoolean(KEY_AUTO_CHECK_OTA, true),
             lastSyncedAt = prefs.getLong(KEY_LAST_SYNCED_AT, 0L),
@@ -151,6 +158,13 @@ class LocalMedicalStore(private val context: Context) {
             .putString(KEY_NOON_TIME, updated.noonTime)
             .putString(KEY_AFTERNOON_TIME, updated.afternoonTime)
             .putString(KEY_EVENING_TIME, updated.eveningTime)
+            .putBoolean(KEY_TELEGRAM_ENABLED, updated.telegramEnabled)
+            .putString(KEY_TELEGRAM_BOT_TOKEN, updated.telegramBotToken.trim())
+            .putString(KEY_TELEGRAM_CHAT_ID, updated.telegramChatId.trim())
+            .putString(KEY_TELEGRAM_GROUP_NAME, updated.telegramGroupName.trim())
+            .putBoolean(KEY_TELEGRAM_NOTIFY_DUE, updated.telegramNotifyOnDue)
+            .putBoolean(KEY_TELEGRAM_NOTIFY_TAKEN, updated.telegramNotifyOnTaken)
+            .putBoolean(KEY_TELEGRAM_NOTIFY_SNOOZE_SKIP, updated.telegramNotifyOnSnoozeOrSkip)
             .putBoolean(KEY_AUTO_SYNC, updated.autoSyncEnabled)
             .putBoolean(KEY_AUTO_CHECK_OTA, updated.autoCheckOta)
             .putLong(KEY_LAST_SYNCED_AT, updated.lastSyncedAt)
@@ -496,6 +510,13 @@ class LocalMedicalStore(private val context: Context) {
         private const val KEY_NOON_TIME = "slot_noon_time"
         private const val KEY_AFTERNOON_TIME = "slot_afternoon_time"
         private const val KEY_EVENING_TIME = "slot_evening_time"
+        private const val KEY_TELEGRAM_ENABLED = "telegram_enabled"
+        private const val KEY_TELEGRAM_BOT_TOKEN = "telegram_bot_token"
+        private const val KEY_TELEGRAM_CHAT_ID = "telegram_chat_id"
+        private const val KEY_TELEGRAM_GROUP_NAME = "telegram_group_name"
+        private const val KEY_TELEGRAM_NOTIFY_DUE = "telegram_notify_due"
+        private const val KEY_TELEGRAM_NOTIFY_TAKEN = "telegram_notify_taken"
+        private const val KEY_TELEGRAM_NOTIFY_SNOOZE_SKIP = "telegram_notify_snooze_skip"
         private const val KEY_AUTO_SYNC = "auto_sync_enabled"
         private const val KEY_AUTO_CHECK_OTA = "auto_check_ota"
         private const val KEY_LAST_SYNCED_AT = "last_synced_at"

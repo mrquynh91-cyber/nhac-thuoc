@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -60,6 +62,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +88,7 @@ import com.medlens.ai.ota.OtaReleaseInfo
 import com.medlens.ai.ota.OtaUpdateState
 import com.medlens.ai.reminder.MedicationNotificationHelper
 import com.medlens.ai.reminder.MedicationReminderScheduler
+import com.medlens.ai.reminder.TelegramDiscoveredChat
 import com.medlens.ai.ui.components.AddEditMedicationReminderDialog
 import com.medlens.ai.ui.theme.AlertRed
 import com.medlens.ai.ui.theme.AlertRedBg
@@ -110,11 +114,24 @@ fun SyncAndOtaScreen(
     cloudSyncState: CloudSyncUiState,
     otaState: OtaUpdateState,
     otaUpdater: GitHubOtaUpdater,
+    isTelegramBusy: Boolean,
+    discoveredTelegramChats: List<TelegramDiscoveredChat>,
     onSaveDefaultSlotTimes: (String, String, String, String) -> Unit,
     onSaveReminder: (MedicationReminder) -> Unit,
     onToggleReminder: (MedicationReminder) -> Unit,
     onDeleteReminder: (MedicationReminder) -> Unit,
     onSendTestNotification: () -> Unit,
+    onSaveTelegramConfig: (
+        enabled: Boolean,
+        botToken: String,
+        chatId: String,
+        groupName: String,
+        notifyOnDue: Boolean,
+        notifyOnTaken: Boolean,
+        notifyOnSnoozeOrSkip: Boolean
+    ) -> Unit,
+    onDiscoverTelegramGroups: (botToken: String) -> Unit,
+    onSendTelegramTest: (botToken: String, chatId: String, groupName: String) -> Unit,
     onSaveGeminiConfig: (apiKey: String, proxyUrl: String, proxyToken: String, model: String) -> Unit,
     onSaveOtaConfig: (String, String, Boolean) -> Unit,
     onToggleAutoSync: (Boolean) -> Unit,
@@ -149,6 +166,26 @@ fun SyncAndOtaScreen(
     // Reminder Add/Edit dialog state
     var showCreateReminder by remember { mutableStateOf(false) }
     var editingReminder by remember { mutableStateOf<MedicationReminder?>(null) }
+
+    // Telegram group reminder inputs
+    var telegramEnabled by remember(settings.telegramEnabled) { mutableStateOf(settings.telegramEnabled) }
+    var telegramBotToken by remember(settings.telegramBotToken) { mutableStateOf(settings.telegramBotToken) }
+    var telegramChatId by remember(settings.telegramChatId) { mutableStateOf(settings.telegramChatId) }
+    var telegramGroupName by remember(settings.telegramGroupName) { mutableStateOf(settings.telegramGroupName) }
+    var telegramNotifyDue by remember(settings.telegramNotifyOnDue) { mutableStateOf(settings.telegramNotifyOnDue) }
+    var telegramNotifyTaken by remember(settings.telegramNotifyOnTaken) { mutableStateOf(settings.telegramNotifyOnTaken) }
+    var telegramNotifySnoozeSkip by remember(settings.telegramNotifyOnSnoozeOrSkip) {
+        mutableStateOf(settings.telegramNotifyOnSnoozeOrSkip)
+    }
+    var showTelegramToken by remember { mutableStateOf(false) }
+
+    LaunchedEffect(discoveredTelegramChats) {
+        if (discoveredTelegramChats.size == 1) {
+            val only = discoveredTelegramChats.first()
+            telegramChatId = only.chatId
+            telegramGroupName = only.title
+        }
+    }
 
     // Gemini inputs (keep built-in proxy credentials hidden unless user expands advanced override)
     var apiKeyInput by remember(settings.geminiApiKey) { mutableStateOf(settings.geminiApiKey) }
@@ -204,6 +241,7 @@ fun SyncAndOtaScreen(
 
     // Collapsible sections state — all collapsed by default for a clean screen
     var expandedReminder by remember { mutableStateOf(false) }
+    var expandedTelegram by remember { mutableStateOf(false) }
     var expandedGemini by remember { mutableStateOf(false) }
     var expandedFirebase by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
@@ -417,7 +455,230 @@ fun SyncAndOtaScreen(
             }
         }
 
-        // 2. Gemini AI Card
+        // 2. Telegram Group Medication Alerts
+        item {
+            val telegramSubtitle = when {
+                settings.telegramEnabled && settings.hasTelegramConfigured ->
+                    "Đã bật • Nhóm: ${settings.telegramGroupName.ifBlank { settings.telegramChatId }}"
+                settings.hasTelegramConfigured ->
+                    "Đã kết nối (đang tắt) • ${settings.telegramGroupName.ifBlank { settings.telegramChatId }}"
+                else ->
+                    "Chưa bật — Gửi nhắc uống thuốc & xác nhận về nhóm gia đình"
+            }
+            SectionCard(
+                title = "Nhắc nhở qua nhóm Telegram",
+                subtitle = telegramSubtitle,
+                subtitleColor = if (settings.telegramEnabled && settings.hasTelegramConfigured) NormalGreen else MutedText,
+                icon = Icons.AutoMirrored.Filled.Send,
+                expanded = expandedTelegram,
+                onToggle = { expandedTelegram = !expandedTelegram }
+            ) {
+                Surface(
+                    color = InfoBlueBg.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = "Hướng dẫn kết nối nhanh (30 giây):",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = InfoBlue
+                        )
+                        Text(
+                            text = "1. Nhắn @BotFather trên Telegram → /newbot để lấy Bot Token.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "2. Thêm Bot vào nhóm Telegram gia đình và nhắn 1 tin bất kỳ (vd: /start).",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "3. Dán Bot Token bên dưới rồi bấm 'Tự động tìm nhóm'.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Bật gửi nhắc nhở về nhóm Telegram", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = "Tự động báo về nhóm khi đến giờ uống, đã uống hoặc nhắc lại",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MutedText
+                        )
+                    }
+                    Switch(
+                        checked = telegramEnabled,
+                        onCheckedChange = { telegramEnabled = it }
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = telegramBotToken,
+                    onValueChange = { telegramBotToken = it },
+                    label = { Text("Telegram Bot Token *") },
+                    placeholder = { Text("123456789:AAH...") },
+                    singleLine = true,
+                    visualTransformation = if (showTelegramToken) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showTelegramToken = !showTelegramToken }) {
+                            Icon(
+                                imageVector = if (showTelegramToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Hiện/ẩn Bot Token"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = { onDiscoverTelegramGroups(telegramBotToken) },
+                    enabled = !isTelegramBusy && telegramBotToken.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isTelegramBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Đang tìm nhóm Telegram...")
+                    } else {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Tự động tìm nhóm Telegram")
+                    }
+                }
+
+                if (discoveredTelegramChats.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Nhóm / cuộc trò chuyện tìm thấy (bấm để chọn):",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MutedText
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        discoveredTelegramChats.forEach { chat ->
+                            val selected = telegramChatId.trim() == chat.chatId
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    telegramChatId = chat.chatId
+                                    telegramGroupName = chat.title
+                                },
+                                label = { Text("${chat.title} (${chat.chatId})") }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = telegramChatId,
+                    onValueChange = { telegramChatId = it },
+                    label = { Text("Chat ID nhóm Telegram *") },
+                    placeholder = { Text("Ví dụ: -1001234567890") },
+                    singleLine = true,
+                    supportingText = if (telegramGroupName.isNotBlank()) {
+                        { Text("Tên nhóm: $telegramGroupName", color = NormalGreen) }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Các loại thông báo gửi về nhóm:",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MutedText
+                )
+                Spacer(Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⏰ Đến giờ uống thuốc (kèm danh sách & cách uống)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = telegramNotifyDue, onCheckedChange = { telegramNotifyDue = it })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "✅ Khi đã bấm 'Đã uống' (báo cả nhà yên tâm)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = telegramNotifyTaken, onCheckedChange = { telegramNotifyTaken = it })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⏳ Khi bấm 'Nhắc lại sau 15 phút' hoặc bỏ qua",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(checked = telegramNotifySnoozeSkip, onCheckedChange = { telegramNotifySnoozeSkip = it })
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            onSaveTelegramConfig(
+                                telegramEnabled,
+                                telegramBotToken,
+                                telegramChatId,
+                                telegramGroupName,
+                                telegramNotifyDue,
+                                telegramNotifyTaken,
+                                telegramNotifySnoozeSkip
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Lưu cấu hình")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            onSendTelegramTest(telegramBotToken, telegramChatId, telegramGroupName)
+                        },
+                        enabled = !isTelegramBusy && telegramBotToken.isNotBlank() && telegramChatId.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Gửi tin thử")
+                    }
+                }
+            }
+        }
+
+        // 3. Gemini AI Card
         item {
             val geminiSubtitle = when {
                 settings.isUsingProxy -> "Máy chủ AI tích hợp sẵn • ${settings.geminiModel}"
