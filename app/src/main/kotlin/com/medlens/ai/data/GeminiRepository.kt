@@ -35,6 +35,11 @@ data class ScanAttachment(
     val displayName: String
 )
 
+data class VoiceChatResult(
+    val transcript: String,
+    val reply: String
+)
+
 class GeminiRepository(
     private val context: Context,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -287,6 +292,127 @@ class GeminiRepository(
                 onModelAutoSwitched = onModelAutoSwitched
             )
             extractCandidateText(responseBody)
+        }
+    }
+
+    suspend fun askDirectAssistantVoice(
+        audioFile: File,
+        profile: FamilyProfile,
+        recentRecords: List<MedicalRecord>,
+        activeReminders: List<MedicationReminder>,
+        focusedRecord: MedicalRecord?,
+        chatHistory: List<RecordChatMessage>,
+        apiKey: String,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<VoiceChatResult> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.replace(Regex("\\s+"), "")
+        if (cleanKey.isEmpty()) {
+            return@withContext Result.failure(
+                IllegalStateException("Chưa có Gemini API Key. Vui lòng nhập khóa API trong tab Cài đặt để dùng hỏi đáp giọng nói.")
+            )
+        }
+
+        runCatching {
+            val audioBytes = audioFile.readBytes()
+            val audioB64 = Base64.encodeToString(audioBytes, Base64.NO_WRAP)
+
+            val profileSummary = buildString {
+                appendLine("Hồ sơ đang trò chuyện: ${profile.name} (${profile.relationship})")
+                if (profile.birthYear.isNotBlank()) appendLine("- Năm sinh: ${profile.birthYear}")
+                appendLine("- Tiền sử dị ứng thuốc: ${profile.drugAllergies.ifBlank { "chưa ghi nhận" }}")
+                appendLine("- Bệnh nền: ${profile.chronicConditions.ifBlank { "chưa ghi nhận" }}")
+            }
+
+            val remindersText = if (activeReminders.isEmpty()) {
+                "Chưa có lịch thuốc đang uống."
+            } else {
+                activeReminders.joinToString("\n") { r ->
+                    "- ${r.medicationName} (${r.dosage}, ${r.mealTiming.labelVi})"
+                }
+            }
+
+            val contextData = if (focusedRecord != null) {
+                "Phiếu khám đang ghim:\n" + json.encodeToString(
+                    focusedRecord.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
+                )
+            } else {
+                recentRecords.take(3).joinToString("\n") { rec ->
+                    "- [${rec.recordDate}] ${rec.title}: ${rec.overallSummary.take(160)}"
+                }.ifBlank { "Chưa có phiếu khám." }
+            }
+
+            val systemText = """
+                Bạn là Trợ lý Chuyên môn Y khoa & Dược lý tiếng Việt trong ứng dụng "Hiểu Đơn" (MedRead VN).
+                Người dùng vừa ghi âm câu hỏi bằng giọng nói tiếng Việt.
+                Hãy:
+                1. Chép lại chính xác nội dung câu hỏi tiếng Việt người dùng vừa nói (trường "transcript").
+                2. Trả lời đầy đủ, chuyên sâu, dễ hiểu mọi câu hỏi thuộc chuyên ngành y học (bệnh lý, thuốc theo y văn chuẩn, xét nghiệm, tương tác thuốc, dinh dưỡng) trình bày gọn gàng theo gạch đầu dòng (trường "reply").
+
+                $profileSummary
+                Thuốc đang đặt lịch nhắc:
+                $remindersText
+                $contextData
+
+                Trả về DUY NHẤT JSON hợp lệ:
+                {
+                  "transcript": "Nội dung câu hỏi người dùng vừa nói",
+                  "reply": "Câu trả lời y khoa tiếng Việt rõ ràng, đầy đủ, dễ hiểu"
+                }
+            """.trimIndent()
+
+            val root = buildJsonObject {
+                put("system_instruction", buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemText) })
+                    })
+                })
+                put("contents", buildJsonArray {
+                    chatHistory.takeLast(8).forEach { msg ->
+                        add(buildJsonObject {
+                            put("role", if (msg.isUser) "user" else "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject { put("text", msg.text) })
+                            })
+                        })
+                    }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("text", "Hãy nghe đoạn ghi âm câu hỏi y khoa tiếng Việt sau, chép lại câu hỏi và trả lời chi tiết bằng JSON.")
+                            })
+                            add(buildJsonObject {
+                                put("inline_data", buildJsonObject {
+                                    put("mime_type", "audio/mp4")
+                                    put("data", audioB64)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.3)
+                    put("responseMimeType", "application/json")
+                })
+            }
+
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                apiKey = cleanKey,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            val text = extractCandidateText(responseBody)
+            val slice = extractJsonObjectSlice(stripMarkdownFence(text))
+            val obj = json.parseToJsonElement(slice).jsonObject
+            val transcript = obj["transcript"]?.jsonPrimitive?.contentOrNull?.trim()
+                ?.ifBlank { "🎤 Câu hỏi bằng giọng nói" } ?: "🎤 Câu hỏi bằng giọng nói"
+            val reply = obj["reply"]?.jsonPrimitive?.contentOrNull?.trim()
+                ?.ifBlank { text } ?: text
+            VoiceChatResult(transcript = transcript, reply = reply)
+        }.also {
+            audioFile.delete()
         }
     }
 

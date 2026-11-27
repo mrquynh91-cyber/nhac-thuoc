@@ -318,6 +318,50 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun sendDirectAssistantVoice(audioFile: File, focusedRecordId: String?) {
+        if (_isAssistantReplying.value) {
+            audioFile.delete()
+            return
+        }
+        val profile = activeProfile.value
+        val previousHistory = activeProfileAssistantChat.value
+        val focusedRecord = focusedRecordId?.let { id -> activeProfileRecords.value.firstOrNull { it.id == id } }
+
+        viewModelScope.launch {
+            _isAssistantReplying.value = true
+            val cfg = settings.value
+            val result = geminiRepo.askDirectAssistantVoice(
+                audioFile = audioFile,
+                profile = profile,
+                recentRecords = activeProfileRecords.value,
+                activeReminders = activeProfileReminders.value.filter { it.isActive },
+                focusedRecord = focusedRecord,
+                chatHistory = previousHistory,
+                apiKey = cfg.geminiApiKey,
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            _isAssistantReplying.value = false
+            result.onSuccess { voiceRes ->
+                localStore.appendAssistantMessages(
+                    profile.id,
+                    RecordChatMessage(isUser = true, text = "🎤 ${voiceRes.transcript}"),
+                    RecordChatMessage(isUser = false, text = voiceRes.reply)
+                )
+            }.onFailure { err ->
+                localStore.appendAssistantMessages(
+                    profile.id,
+                    RecordChatMessage(
+                        isUser = false,
+                        text = "Xin lỗi, chưa xử lý được ghi âm lúc này: ${err.localizedMessage}"
+                    )
+                )
+            }
+        }
+    }
+
     fun clearDirectAssistantChat() {
         val profile = activeProfile.value
         localStore.clearAssistantChat(profile.id)

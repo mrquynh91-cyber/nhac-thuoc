@@ -7,7 +7,11 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -55,6 +59,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val selectedTab by vm.selectedTab.collectAsState()
@@ -108,31 +113,35 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
         return
     }
 
+    val imeVisible = WindowInsets.isImeVisible
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            NavigationBar {
-                MainTab.entries.forEach { tab ->
-                    val icon = when (tab) {
-                        MainTab.HOME -> Icons.Default.Home
-                        MainTab.SCAN -> Icons.Default.CameraAlt
-                        MainTab.RECORDS -> Icons.Default.FolderShared
-                        MainTab.AI_CHAT -> Icons.Default.AutoAwesome
-                        MainTab.SETTINGS -> Icons.Default.Settings
-                    }
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { vm.selectTab(tab) },
-                        icon = { Icon(icon, contentDescription = tab.label) },
-                        label = {
-                            Text(
-                                text = tab.label,
-                                maxLines = 1,
-                                softWrap = false,
-                                style = androidx.compose.material3.MaterialTheme.typography.labelSmall
-                            )
+            if (!imeVisible) {
+                NavigationBar {
+                    MainTab.entries.forEach { tab ->
+                        val icon = when (tab) {
+                            MainTab.HOME -> Icons.Default.Home
+                            MainTab.SCAN -> Icons.Default.CameraAlt
+                            MainTab.RECORDS -> Icons.Default.FolderShared
+                            MainTab.AI_CHAT -> Icons.Default.AutoAwesome
+                            MainTab.SETTINGS -> Icons.Default.Settings
                         }
-                    )
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { vm.selectTab(tab) },
+                            icon = { Icon(icon, contentDescription = tab.label) },
+                            label = {
+                                Text(
+                                    text = tab.label,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -141,6 +150,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
         ) {
             when (selectedTab) {
                 MainTab.HOME -> HomeScreen(
@@ -191,6 +201,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     hasGeminiApiKey = settings.geminiApiKey.isNotBlank(),
                     isReplying = isAssistantReplying,
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
+                    onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
                     onClearChat = { vm.clearDirectAssistantChat() },
                     onGoToSettings = { vm.selectTab(MainTab.SETTINGS) },
                     onShowMessage = { vm.showMessage(it) }
