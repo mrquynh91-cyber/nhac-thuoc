@@ -42,8 +42,24 @@ android {
     buildConfigField("String", "GITHUB_OTA_TOKEN", "\"${readConfig("GITHUB_OTA_TOKEN")}\"")
   }
 
+  signingConfigs {
+    create("release") {
+      val storePath = readConfig("RELEASE_STORE_FILE")
+      if (storePath.isNotEmpty()) {
+        storeFile = file(storePath)
+        storePassword = readConfig("RELEASE_STORE_PASSWORD")
+        keyAlias = readConfig("RELEASE_KEY_ALIAS")
+        keyPassword = readConfig("RELEASE_KEY_PASSWORD")
+      }
+    }
+  }
+
   buildTypes {
     release {
+      val releaseSigning = signingConfigs.getByName("release")
+      if (releaseSigning.storeFile != null) {
+        signingConfig = releaseSigning
+      }
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }

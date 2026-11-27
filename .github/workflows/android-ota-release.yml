@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: "Version name (e.g. 1.0.1)"
+        description: "Version name (e.g. 1.0.2)"
         required: true
-        default: "1.0.1"
+        default: "1.0.2"
       version_code:
-        description: "Android versionCode (integer)"
+        description: "Android versionCode (integer, must increase every release)"
         required: true
-        default: "2"
+        default: "3"
 
 permissions:
   contents: write
@@ -41,18 +41,32 @@ jobs:
           else
             TAG_NAME="${GITHUB_REF_NAME}"
             VERSION_NAME="${TAG_NAME#v}"
-            VERSION_CODE="${GITHUB_RUN_NUMBER}"
+            VERSION_CODE="$((GITHUB_RUN_NUMBER + 1))"
           fi
           echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore fixed release keystore for seamless OTA updates
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > app/hieudon-release.jks
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+            echo "Restored fixed release keystore."
+          else
+            echo "::error::Chua cau hinh GitHub Secret ANDROID_KEYSTORE_BASE64. Hay them 4 secrets (ANDROID_KEYSTORE_BASE64, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD) de ky APK OTA dong nhat!"
+            exit 1
+          fi
 
       - name: Restore optional google-services.json
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '\r\n ' | base64 -d > app/google-services.json
             echo "Restored app/google-services.json from secret."
           else
             echo "No GOOGLE_SERVICES_JSON_BASE64 secret set; building offline-first APK."
@@ -67,17 +81,21 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Run unit tests & Build OTA APK
+      - name: Run unit tests & Build Signed Release OTA APK
         env:
           APP_VERSION_NAME: ${{ steps.version.outputs.version_name }}
           APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
           GITHUB_OTA_REPO: ${{ github.repository }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon
+          RELEASE_STORE_FILE: hieudon-release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew testDebugUnitTest assembleRelease --no-daemon
 
-      - name: Rename OTA APK
+      - name: Rename Signed OTA APK
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "HieuDon-${{ steps.version.outputs.tag }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "HieuDon-${{ steps.version.outputs.tag }}.apk"
 
       - name: Publish GitHub Release for OTA Updater
         uses: softprops/action-gh-release@v2
