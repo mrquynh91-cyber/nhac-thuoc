@@ -189,6 +189,103 @@ class GeminiRepository(
         }
     }
 
+    suspend fun askContextualVoiceQuestion(
+        record: MedicalRecord,
+        profile: FamilyProfile?,
+        audioFile: File,
+        endpoint: GeminiEndpointConfig,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<VoiceChatResult> = withContext(Dispatchers.IO) {
+        if (!endpoint.isReady) {
+            audioFile.delete()
+            return@withContext Result.failure(
+                IllegalStateException("Chưa cấu hình máy chủ AI hoặc Gemini API Key trong Cài đặt.")
+            )
+        }
+
+        runCatching {
+            val audioB64 = Base64.encodeToString(audioFile.readBytes(), Base64.NO_WRAP)
+            val recordSnapshot = json.encodeToString(
+                record.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
+            )
+            val profileNote = profile?.let {
+                "Thông tin thành viên: ${it.name} (${it.relationship}), dị ứng thuốc: ${it.drugAllergies.ifBlank { "chưa ghi nhận" }}, bệnh nền: ${it.chronicConditions.ifBlank { "chưa ghi nhận" }}."
+            }.orEmpty()
+
+            val systemText = """
+                Bạn là trợ lý y khoa tiếng Việt thân thiện của ứng dụng "Hiểu Đơn" (MedRead VN).
+                Người dùng vừa ghi âm câu hỏi bằng giọng nói về chính phiếu khám/đơn thuốc bên dưới.
+                Hãy:
+                1. Chép lại chính xác nội dung câu hỏi tiếng Việt người dùng vừa nói (trường "transcript").
+                2. Trả lời rõ ràng, ngắn gọn, dễ hiểu bằng tiếng Việt (trường "reply") dựa trên dữ liệu phiếu bên dưới và kiến thức y khoa an toàn.
+                
+                $profileNote
+                Dữ liệu phiếu hiện tại (JSON):
+                $recordSnapshot
+
+                Trả về DUY NHẤT JSON hợp lệ:
+                {
+                  "transcript": "Câu hỏi người dùng vừa nói",
+                  "reply": "Câu trả lời y khoa tiếng Việt rõ ràng, dễ hiểu"
+                }
+            """.trimIndent()
+
+            val root = buildJsonObject {
+                put("system_instruction", buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemText) })
+                    })
+                })
+                put("contents", buildJsonArray {
+                    record.chatHistory.takeLast(6).forEach { msg ->
+                        add(buildJsonObject {
+                            put("role", if (msg.isUser) "user" else "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject { put("text", msg.text) })
+                            })
+                        })
+                    }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("text", "Nghe đoạn ghi âm câu hỏi tiếng Việt về phiếu này, chép lại và trả lời bằng JSON.")
+                            })
+                            add(buildJsonObject {
+                                put("inline_data", buildJsonObject {
+                                    put("mime_type", "audio/mp4")
+                                    put("data", audioB64)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.3)
+                    put("responseMimeType", "application/json")
+                })
+            }
+
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                endpoint = endpoint,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            val text = extractCandidateText(responseBody)
+            val slice = extractJsonObjectSlice(stripMarkdownFence(text))
+            val obj = json.parseToJsonElement(slice).jsonObject
+            val transcript = obj["transcript"]?.jsonPrimitive?.contentOrNull?.trim()
+                ?.ifBlank { "Câu hỏi bằng giọng nói" } ?: "Câu hỏi bằng giọng nói"
+            val reply = obj["reply"]?.jsonPrimitive?.contentOrNull?.trim()
+                ?.ifBlank { text } ?: text
+            VoiceChatResult(transcript = transcript, reply = reply)
+        }.also {
+            audioFile.delete()
+        }
+    }
+
     suspend fun askDirectAssistantChat(
         profile: FamilyProfile,
         recentRecords: List<MedicalRecord>,

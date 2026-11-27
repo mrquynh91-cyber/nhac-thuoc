@@ -1,8 +1,7 @@
 package com.medlens.ai.ui.components
 
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -16,24 +15,31 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlarmAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
@@ -42,6 +48,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -49,10 +56,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -63,7 +73,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,9 +86,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.medlens.ai.data.AppSettings
 import com.medlens.ai.data.DaySlot
@@ -97,6 +117,8 @@ import com.medlens.ai.ui.theme.TealLightContainer
 import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
 import com.medlens.ai.ui.theme.WarningAmberBg
+import com.medlens.ai.voice.InAppVoiceRecorder
+import kotlinx.coroutines.delay
 import java.io.File
 
 @Composable
@@ -447,24 +469,70 @@ fun RecordDetailScreen(
     onSaveCustomReminder: (MedicationReminder) -> Unit,
     onAddAllReminders: () -> Unit,
     onSendChatQuestion: (String) -> Unit,
+    onSendChatVoice: (File) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val listState = rememberLazyListState()
+
     var showNormalIndicators by remember(record.id) { mutableStateOf(false) }
     var chatInput by remember { mutableStateOf("") }
     var pendingMedForTimePicker by remember { mutableStateOf<MedicationItem?>(null) }
 
-    // Voice input (Vietnamese Speech-to-Text)
-    val voiceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spoken = matches?.firstOrNull().orEmpty()
-            if (spoken.isNotBlank()) {
-                chatInput = spoken
-                onSendChatQuestion(spoken)
-                chatInput = ""
+    // Dedicated compact in-app voice recorder (replaces full-screen Google Speech popup)
+    val voiceRecorder = remember(context) { InAppVoiceRecorder(context) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(Unit) {
+        onDispose { voiceRecorder.stopAndDiscard() }
+    }
+
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordingSeconds = 0
+            while (isRecording) {
+                delay(1000L)
+                recordingSeconds++
+                if (recordingSeconds >= 60) {
+                    isRecording = false
+                    val file = voiceRecorder.stopAndGetFile()
+                    if (file != null) onSendChatVoice(file)
+                }
+            }
+        }
+    }
+
+    fun startInAppRecording() {
+        keyboardController?.hide()
+        voiceRecorder.startRecording()
+            .onSuccess {
+                isRecording = true
+            }
+            .onFailure { err ->
+                isRecording = false
+                onShowMessage("Không thể mở micro ghi âm: ${err.localizedMessage}")
+            }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startInAppRecording()
+        } else {
+            onShowMessage("Cần cấp quyền Micro để ghi âm hỏi đáp trực tiếp trong app.")
+        }
+    }
+
+    // Auto-scroll to Q&A section when user sends a question or AI replies
+    LaunchedEffect(record.chatHistory.size, isChatReplying) {
+        if (record.chatHistory.isNotEmpty() || isChatReplying) {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            if (totalItems > 0) {
+                listState.animateScrollToItem((totalItems - 2).coerceAtLeast(0))
             }
         }
     }
@@ -513,12 +581,141 @@ fun RecordDetailScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        bottomBar = {
+            // Docked bottom Q&A bar: rises directly above the keyboard (never hidden) and hosts compact in-app mic bar
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                    if (isRecording) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(AlertRedBg.copy(alpha = 0.78f))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(AlertRed),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.GraphicEq,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Đang ghi âm câu hỏi...",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = AlertRed,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "00:%02d • Bấm nút xanh để gửi".format(recordingSeconds),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF7F1D1D)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    isRecording = false
+                                    voiceRecorder.stopAndDiscard()
+                                }
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Hủy ghi âm", tint = AlertRed)
+                            }
+                            FilledIconButton(
+                                onClick = {
+                                    isRecording = false
+                                    val audioFile = voiceRecorder.stopAndGetFile()
+                                    if (audioFile != null) {
+                                        onSendChatVoice(audioFile)
+                                    } else {
+                                        onShowMessage("Đoạn ghi âm quá ngắn, hãy nói rõ hơn nhé.")
+                                    }
+                                },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = TealPrimary,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = "Dừng và gửi giọng nói")
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = chatInput,
+                                onValueChange = { chatInput = it },
+                                placeholder = { Text("Hỏi thêm về phiếu này...") },
+                                singleLine = false,
+                                maxLines = 3,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilledTonalIconButton(
+                                onClick = {
+                                    val granted = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (granted) {
+                                        startInAppRecording()
+                                    } else {
+                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                },
+                                enabled = !isChatReplying
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = "Ghi âm trực tiếp", tint = TealPrimary)
+                            }
+                            FilledTonalIconButton(
+                                onClick = {
+                                    if (chatInput.isNotBlank()) {
+                                        keyboardController?.hide()
+                                        onSendChatQuestion(chatInput)
+                                        chatInput = ""
+                                    }
+                                },
+                                enabled = chatInput.isNotBlank() && !isChatReplying
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi", tint = TealPrimary)
+                            }
+                        }
+                    }
+                }
+            }
         }
     ) { padding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .consumeWindowInsets(padding),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -855,51 +1052,6 @@ fun RecordDetailScreen(
                                 Text("Trợ lý AI đang trả lời...", style = MaterialTheme.typography.bodySmall, color = MutedText)
                             }
                         }
-
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = chatInput,
-                                onValueChange = { chatInput = it },
-                                placeholder = { Text("Hỏi thêm về phiếu này...") },
-                                singleLine = false,
-                                maxLines = 3,
-                                modifier = Modifier.weight(1f)
-                            )
-                            FilledTonalIconButton(
-                                onClick = {
-                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                        putExtra(
-                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                        )
-                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
-                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Nói câu hỏi của bạn về phiếu khám...")
-                                    }
-                                    runCatching { voiceLauncher.launch(intent) }.onFailure {
-                                        onShowMessage("Thiết bị chưa cài đặt nhập giọng nói Google.")
-                                    }
-                                },
-                                enabled = !isChatReplying
-                            ) {
-                                Icon(Icons.Default.Mic, contentDescription = "Nói câu hỏi", tint = TealPrimary)
-                            }
-                            FilledTonalIconButton(
-                                onClick = {
-                                    if (chatInput.isNotBlank()) {
-                                        onSendChatQuestion(chatInput)
-                                        chatInput = ""
-                                    }
-                                },
-                                enabled = chatInput.isNotBlank() && !isChatReplying
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi", tint = TealPrimary)
-                            }
-                        }
                     }
                 }
             }
@@ -958,11 +1110,40 @@ private fun ChatBubble(message: RecordChatMessage) {
             modifier = Modifier.fillMaxWidth(0.92f)
         ) {
             Text(
-                text = message.text,
+                text = if (message.isUser) AnnotatedString(message.text) else formatRecordChatMarkdown(message.text),
                 color = fg,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(11.dp)
             )
+        }
+    }
+}
+
+private fun formatRecordChatMarkdown(raw: String): AnnotatedString {
+    val normalized = raw
+        .replace(Regex("(?m)^\\s*\\*\\s+"), "• ")
+        .replace(Regex("(?m)^\\s*-\\s+"), "• ")
+    val tokenRegex = Regex("\\*\\*(.+?)\\*\\*|\\*([^*\n]+?)\\*")
+    return buildAnnotatedString {
+        var idx = 0
+        for (match in tokenRegex.findAll(normalized)) {
+            if (match.range.first > idx) {
+                append(normalized.substring(idx, match.range.first))
+            }
+            val boldText = match.groups[1]?.value
+            val italicText = match.groups[2]?.value
+            when {
+                boldText != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(boldText)
+                }
+                italicText != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append(italicText)
+                }
+            }
+            idx = match.range.last + 1
+        }
+        if (idx < normalized.length) {
+            append(normalized.substring(idx))
         }
     }
 }

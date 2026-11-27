@@ -287,6 +287,45 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun askRecordFollowUpVoice(record: MedicalRecord, audioFile: File) {
+        if (_isChatReplying.value) {
+            audioFile.delete()
+            return
+        }
+        viewModelScope.launch {
+            _isChatReplying.value = true
+            val cfg = settings.value
+            val profile = profiles.value.firstOrNull { it.id == record.profileId }
+            val result = geminiRepo.askContextualVoiceQuestion(
+                record = record,
+                profile = profile,
+                audioFile = audioFile,
+                endpoint = currentGeminiEndpoint(),
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            _isChatReplying.value = false
+            result.onSuccess { voiceRes ->
+                localStore.appendChatMessages(
+                    record.id,
+                    RecordChatMessage(isUser = true, text = "🎤 ${voiceRes.transcript}"),
+                    RecordChatMessage(isUser = false, text = voiceRes.reply)
+                )
+                triggerAutoSyncIfReady()
+            }.onFailure { err ->
+                localStore.appendChatMessages(
+                    record.id,
+                    RecordChatMessage(
+                        isUser = false,
+                        text = "Xin lỗi, chưa xử lý được ghi âm lúc này: ${err.localizedMessage}"
+                    )
+                )
+            }
+        }
+    }
+
     fun sendDirectAssistantMessage(question: String, focusedRecordId: String?) {
         val clean = question.trim()
         if (clean.isEmpty() || _isAssistantReplying.value) return

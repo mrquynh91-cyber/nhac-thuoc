@@ -128,6 +128,9 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             onSendChatQuestion = { q ->
                 vm.askRecordFollowUp(record, q)
             },
+            onSendChatVoice = { file ->
+                vm.askRecordFollowUpVoice(record, file)
+            },
             onShowMessage = { vm.showMessage(it) }
         )
         return
