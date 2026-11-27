@@ -30,7 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.medlens.ai.data.IntakeStatus
@@ -40,6 +42,7 @@ import com.medlens.ai.ui.components.RecordDetailScreen
 import com.medlens.ai.ui.screens.AiChatScreen
 import com.medlens.ai.ui.screens.FamilyRecordsScreen
 import com.medlens.ai.ui.screens.HomeScreen
+import com.medlens.ai.ui.screens.MedicationManagerScreen
 import com.medlens.ai.ui.screens.ScanScreen
 import com.medlens.ai.ui.screens.SyncAndOtaScreen
 import com.medlens.ai.ui.theme.MedLensTheme
@@ -81,6 +84,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val snackbarMsg by vm.snackbarMessage.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var showMedicationManager by remember { mutableStateOf(false) }
 
     LaunchedEffect(snackbarMsg) {
         val msg = snackbarMsg
@@ -89,6 +93,21 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             snackbarHostState.showSnackbar(msg)
             vm.consumeSnackbar()
         }
+    }
+
+    if (showMedicationManager) {
+        MedicationManagerScreen(
+            activeProfile = activeProfile,
+            reminders = activeReminders,
+            settings = settings,
+            snackbarHostState = snackbarHostState,
+            onBack = { showMedicationManager = false },
+            onSaveReminder = { vm.saveReminder(it) },
+            onToggleReminder = { vm.toggleReminderActive(it) },
+            onDeleteReminder = { vm.deleteReminder(it) },
+            onSendTestNotification = { vm.sendTestNotification() }
+        )
+        return
     }
 
     if (activeDetail != null) {
@@ -158,11 +177,14 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     activeProfile = activeProfile,
                     records = activeRecords,
                     todayDoses = activeTodayDoses,
+                    settings = settings,
                     otaState = otaState,
                     onSelectProfile = { vm.selectProfile(it) },
                     onNavigateToScan = { vm.selectTab(MainTab.SCAN) },
                     onNavigateToRecords = { vm.selectTab(MainTab.RECORDS) },
                     onNavigateToSettings = { vm.selectTab(MainTab.SETTINGS) },
+                    onOpenMedicationManager = { showMedicationManager = true },
+                    onSaveReminder = { vm.saveReminder(it) },
                     onOpenRecord = { vm.openRecordDetail(it) },
                     onMarkDoseTaken = { dose -> vm.markDoseStatus(dose, IntakeStatus.TAKEN) },
                     onLoadSampleLab = { vm.loadSampleLabWithTrend() },

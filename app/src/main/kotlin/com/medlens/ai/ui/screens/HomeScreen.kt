@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CameraAlt
@@ -56,13 +57,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.medlens.ai.BuildConfig
+import com.medlens.ai.data.AppSettings
 import com.medlens.ai.data.DocumentType
 import com.medlens.ai.data.FamilyProfile
 import com.medlens.ai.data.IndicatorStatus
 import com.medlens.ai.data.IntakeStatus
 import com.medlens.ai.data.MedicalRecord
+import com.medlens.ai.data.MedicationReminder
 import com.medlens.ai.ota.OtaUpdateState
 import com.medlens.ai.ui.ScheduledDoseItem
+import com.medlens.ai.ui.components.AddEditMedicationReminderDialog
 import com.medlens.ai.ui.components.MedicalDisclaimerCard
 import com.medlens.ai.ui.theme.AlertRed
 import com.medlens.ai.ui.theme.AlertRedBg
@@ -82,11 +86,14 @@ fun HomeScreen(
     activeProfile: FamilyProfile,
     records: List<MedicalRecord>,
     todayDoses: List<ScheduledDoseItem>,
+    settings: AppSettings,
     otaState: OtaUpdateState,
     onSelectProfile: (String) -> Unit,
     onNavigateToScan: () -> Unit,
     onNavigateToRecords: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onOpenMedicationManager: () -> Unit,
+    onSaveReminder: (MedicationReminder) -> Unit,
     onOpenRecord: (MedicalRecord) -> Unit,
     onMarkDoseTaken: (ScheduledDoseItem) -> Unit,
     onLoadSampleLab: () -> Unit,
@@ -96,6 +103,7 @@ fun HomeScreen(
     val totalCount = todayDoses.size
     val progress = if (totalCount > 0) takenCount.toFloat() / totalCount.toFloat() else 0f
     var profileMenuExpanded by remember { mutableStateOf(false) }
+    var showQuickAddReminder by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -281,19 +289,25 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(Icons.Default.Alarm, contentDescription = null, tint = TealPrimary)
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 text = "Cữ thuốc hôm nay • ${activeProfile.name}",
-                                style = MaterialTheme.typography.titleMedium
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Quản lý",
+                            text = "Quản lý ›",
                             style = MaterialTheme.typography.labelLarge,
                             color = TealPrimary,
-                            modifier = Modifier.clickable { onNavigateToSettings() }
+                            modifier = Modifier.clickable { onOpenMedicationManager() }
                         )
                     }
 
@@ -387,6 +401,28 @@ fun HomeScreen(
                             }
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = { showQuickAddReminder = true },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Thêm thuốc")
+                        }
+                        OutlinedButton(
+                            onClick = onOpenMedicationManager,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text("Sửa / Xóa lịch")
+                        }
+                    }
                 }
             }
         }
@@ -474,6 +510,24 @@ fun HomeScreen(
         item {
             MedicalDisclaimerCard(MedicalRecord.DEFAULT_MEDICAL_DISCLAIMER)
         }
+    }
+
+    if (showQuickAddReminder) {
+        AddEditMedicationReminderDialog(
+            profileId = activeProfile.id,
+            initial = null,
+            defaultTimes = listOf(
+                settings.morningTime,
+                settings.noonTime,
+                settings.afternoonTime,
+                settings.eveningTime
+            ),
+            onDismiss = { showQuickAddReminder = false },
+            onSave = { saved ->
+                onSaveReminder(saved)
+                showQuickAddReminder = false
+            }
+        )
     }
 }
 
