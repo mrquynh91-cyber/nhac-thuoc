@@ -55,9 +55,10 @@ class GeminiRepository(
         profileContext: FamilyProfile?,
         apiKey: String,
         modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
-        hintType: DocumentType = DocumentType.LAB_RESULT
+        hintType: DocumentType = DocumentType.LAB_RESULT,
+        onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<MedicalRecord> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim()
+        val cleanKey = apiKey.replace(Regex("\\s+"), "")
         if (attachments.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Vui lòng chụp ảnh hoặc chọn ít nhất 1 ảnh / file PDF."))
         }
@@ -77,29 +78,21 @@ class GeminiRepository(
                 profileContext = profileContext
             )
 
-            val endpoint =
-                "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$cleanKey"
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                apiKey = cleanKey,
+                requestJson = requestJson,
+                onModelAutoSwitched = onModelAutoSwitched
+            )
 
-            val request = Request.Builder()
-                .url(endpoint)
-                .post(requestJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val bodyString = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    throw IllegalStateException(parseGeminiError(response.code, bodyString))
-                }
-
-                val textPayload = extractCandidateText(bodyString)
-                val parsed = parseStructuredAnalysis(textPayload)
-                val firstImagePath = preparedList.firstOrNull { it.mimeType.startsWith("image/") }?.savedFile?.absolutePath
-                parsed.toMedicalRecord(
-                    profileId = profileId,
-                    localImagePath = firstImagePath,
-                    localAttachmentPaths = preparedList.map { it.savedFile.absolutePath }
-                )
-            }
+            val textPayload = extractCandidateText(responseBody)
+            val parsed = parseStructuredAnalysis(textPayload)
+            val firstImagePath = preparedList.firstOrNull { it.mimeType.startsWith("image/") }?.savedFile?.absolutePath
+            parsed.toMedicalRecord(
+                profileId = profileId,
+                localImagePath = firstImagePath,
+                localAttachmentPaths = preparedList.map { it.savedFile.absolutePath }
+            )
         }
     }
 
@@ -108,14 +101,15 @@ class GeminiRepository(
         profile: FamilyProfile?,
         question: String,
         apiKey: String,
-        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         val cleanQuestion = question.trim()
         if (cleanQuestion.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Vui lòng nhập hoặc nói câu hỏi."))
         }
 
-        val cleanKey = apiKey.trim()
+        val cleanKey = apiKey.replace(Regex("\\s+"), "")
         if (cleanKey.isEmpty()) {
             return@withContext Result.success(buildOfflineHelpfulReply(record, profile, cleanQuestion))
         }
@@ -169,21 +163,128 @@ class GeminiRepository(
                 })
             }
 
-            val endpoint =
-                "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$cleanKey"
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                apiKey = cleanKey,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            extractCandidateText(responseBody)
+        }
+    }
+
+    private fun executeGenerateContentWithAutoFallback(
+        preferredModel: String,
+        apiKey: String,
+        requestJson: String,
+        onModelAutoSwitched: ((String) -> Unit)?
+    ): String {
+        val primary = normalizeModelId(preferredModel).ifEmpty { AppSettings.DEFAULT_GEMINI_MODEL }
+        val firstAttempt = postGenerateContent(primary, apiKey, requestJson)
+        if (firstAttempt.isSuccess) return firstAttempt.body
+
+        // If 404 (model retired / unavailable for this API key), discover active models dynamically!
+        if (firstAttempt.code == 404) {
+            val discovered = discoverAvailableGeminiModels(apiKey)
+            val fallbackCandidates = (discovered + listOf(
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-flash-latest",
+                "gemini-2.5-pro"
+            ))
+                .map { normalizeModelId(it) }
+                .distinct()
+                .filter { it.isNotEmpty() && it != primary }
+
+            var lastError = firstAttempt
+            for (candidate in fallbackCandidates.take(4)) {
+                val retry = postGenerateContent(candidate, apiKey, requestJson)
+                if (retry.isSuccess) {
+                    onModelAutoSwitched?.invoke(candidate)
+                    return retry.body
+                }
+                lastError = retry
+                if (retry.code != 404) break
+            }
+            throw IllegalStateException(parseGeminiError(lastError.code, lastError.body, lastError.model))
+        }
+
+        throw IllegalStateException(parseGeminiError(firstAttempt.code, firstAttempt.body, primary))
+    }
+
+    private data class RawApiAttempt(
+        val model: String,
+        val code: Int,
+        val isSuccess: Boolean,
+        val body: String
+    )
+
+    private fun postGenerateContent(modelId: String, apiKey: String, requestJson: String): RawApiAttempt {
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent"
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("x-goog-api-key", apiKey)
+            .post(requestJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        return httpClient.newCall(request).execute().use { response ->
+            RawApiAttempt(
+                model = modelId,
+                code = response.code,
+                isSuccess = response.isSuccessful,
+                body = response.body?.string().orEmpty()
+            )
+        }
+    }
+
+    private fun discoverAvailableGeminiModels(apiKey: String): List<String> {
+        return runCatching {
             val request = Request.Builder()
-                .url(endpoint)
-                .post(root.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100")
+                .header("x-goog-api-key", apiKey)
+                .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
-                val bodyString = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    throw IllegalStateException(parseGeminiError(response.code, bodyString))
+                if (!response.isSuccessful) return@runCatching emptyList()
+                val body = response.body?.string().orEmpty()
+                val root = json.parseToJsonElement(body).jsonObject
+                val models = root["models"]?.jsonArray ?: return@runCatching emptyList()
+
+                val usable = models.mapNotNull { el ->
+                    val obj = el.jsonObject
+                    val rawName = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val id = normalizeModelId(rawName)
+                    val methods = obj["supportedGenerationMethods"]?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                        .orEmpty()
+                    val supportsGenerate = methods.contains("generateContent")
+                    val isGeminiTextVision = id.startsWith("gemini-") &&
+                        !id.contains("embedding") &&
+                        !id.contains("tts") &&
+                        !id.contains("audio") &&
+                        !id.contains("imagen") &&
+                        !id.contains("veo")
+                    if (supportsGenerate && isGeminiTextVision) id else null
                 }
-                extractCandidateText(bodyString)
+
+                usable.sortedBy { modelRank(it) }
             }
-        }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun normalizeModelId(raw: String): String {
+        return raw.trim().removePrefix("models/")
+    }
+
+    private fun modelRank(id: String): Int = when {
+        id == "gemini-2.5-flash" -> 0
+        id == "gemini-2.5-flash-lite" -> 1
+        id == "gemini-flash-latest" -> 2
+        id.startsWith("gemini-3") && id.contains("flash") -> 3
+        id == "gemini-2.5-pro" -> 4
+        id.contains("flash") -> 5
+        else -> 10
     }
 
     private fun buildOfflineHelpfulReply(
@@ -273,8 +374,8 @@ class GeminiRepository(
     ): String {
         val modeInstruction = when (hintType) {
             DocumentType.LAB_RESULT -> "Chế độ người dùng chọn: PHIẾU XÉT NGHIỆM (máu, nước tiểu, sinh hóa...)."
-            DocumentType.PRESCRIPTION -> "Chế độ người dùng chọn: ĐƠN THUỐC (chữ in hoặc chữ viết tay bác sĩ)."
-            DocumentType.MIXED -> "Hãy tự nhận diện đây là phiếu xét nghiệm, đơn thuốc, hay cả hai."
+            DocumentType.PRESCRIPTION -> "Chế độ người dùng chọn: ĐƠN THUỐC hoặc ẢNH VỎ HỘP / CHAI / LỌ / VỈ THUỐC CÓ NHÃN HƯỚNG DẪN UỐNG (chữ in hoặc chữ viết tay bác sĩ/nhà thuốc)."
+            DocumentType.MIXED -> "Hãy tự nhận diện đây là phiếu xét nghiệm, đơn thuốc, vỏ hộp/chai thuốc, hay cả hai."
         }
         val profileInfo = profileContext?.let {
             "Hồ sơ người khám: ${it.name} (${it.relationship}), dị ứng thuốc: ${it.drugAllergies.ifBlank { "chưa có" }}, bệnh nền: ${it.chronicConditions.ifBlank { "chưa có" }}."
@@ -415,7 +516,7 @@ class GeminiRepository(
         return text
     }
 
-    private fun parseGeminiError(code: Int, body: String): String {
+    private fun parseGeminiError(code: Int, body: String, modelId: String): String {
         val serverMsg = runCatching {
             val obj = json.parseToJsonElement(body).jsonObject
             obj["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
@@ -423,9 +524,9 @@ class GeminiRepository(
 
         return when (code) {
             400, 401, 403 -> "Gemini API Key không hợp lệ hoặc chưa được cấp quyền ($code). ${serverMsg.orEmpty()}"
-            404 -> "Model Gemini đã chọn không khả dụng ($code). Hãy dùng gemini-2.5-flash trong Cài đặt."
+            404 -> "Model '$modelId' không khả dụng (404) kể cả sau khi tự thử đổi model. Chi tiết Google: ${serverMsg ?: body.take(180)}"
             429 -> "Gemini API đã vượt hạn mức tạm thời (429). Vui lòng thử lại sau ít phút."
-            else -> "Lỗi gọi Gemini API ($code): ${serverMsg ?: body.take(200)}"
+            else -> "Lỗi gọi Gemini API ($code - $modelId): ${serverMsg ?: body.take(200)}"
         }
     }
 }

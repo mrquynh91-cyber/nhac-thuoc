@@ -215,8 +215,9 @@ data class AppSettings(
         const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
         val SUPPORTED_MODELS = listOf(
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-2.5-pro",
-            "gemini-2.0-flash"
+            "gemini-flash-latest"
         )
     }
 }

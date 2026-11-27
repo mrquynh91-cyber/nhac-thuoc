@@ -209,7 +209,10 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 profileContext = currentProfile,
                 apiKey = cfg.geminiApiKey,
                 modelName = cfg.geminiModel,
-                hintType = mode
+                hintType = mode,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
             )
             _isAnalyzing.value = false
             result.onSuccess { record ->
@@ -239,7 +242,10 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 profile = profile,
                 question = clean,
                 apiKey = cfg.geminiApiKey,
-                modelName = cfg.geminiModel
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
             )
             _isChatReplying.value = false
             result.onSuccess { answer ->
