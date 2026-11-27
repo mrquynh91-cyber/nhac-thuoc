@@ -1,0 +1,205 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model — "Hiểu Đơn" (MedLensAI)
+// ===============================================================
+//
+// Authentication:
+//   - Firebase Auth (Email/Password AND Anonymous Quick Sync).
+//   - Anonymous users are explicitly supported; email_verified is NOT required.
+//   - Every user is strictly isolated to their own `users/{userId}` subtree.
+//   - Note: The client does NOT create a parent `users/{userId}` document;
+//     it reads/writes directly to the 4 subcollections below.
+//
+// Collection: users/{userId}/profiles/{profileId}
+// Document ID: profileId (1..128 chars; e.g., "profile_self" or UUID)
+// Fields (strict schema — no extraneous fields allowed):
+//   - id: string (required, immutable, must equal profileId, 1..128 chars)
+//   - updatedAt: int (required, epoch ms > 0 and <= 4102444800000)
+//   - payloadJson: string (required, serialized FamilyProfile JSON, 2..51200 chars / ~50 KB)
+//
+// Collection: users/{userId}/records/{recordId}
+// Document ID: recordId (1..128 chars; UUID)
+// Fields (strict schema — no extraneous fields allowed):
+//   - id: string (required, immutable, must equal recordId, 1..128 chars)
+//   - updatedAt: int (required, epoch ms > 0 and <= 4102444800000)
+//   - payloadJson: string (required, serialized MedicalRecord JSON, 2..307200 chars / ~300 KB)
+//
+// Collection: users/{userId}/reminders/{reminderId}
+// Document ID: reminderId (1..128 chars; UUID)
+// Fields (strict schema — no extraneous fields allowed):
+//   - id: string (required, immutable, must equal reminderId, 1..128 chars)
+//   - updatedAt: int (required, epoch ms > 0 and <= 4102444800000)
+//   - payloadJson: string (required, serialized MedicationReminder JSON, 2..51200 chars / ~50 KB)
+//
+// Collection: users/{userId}/intake_logs/{logId}
+// Document ID: logId (1..128 chars; e.g., "{reminderId}_{yyyy-MM-dd}_{HH:mm}" or UUID)
+// Fields (strict schema — no extraneous fields allowed):
+//   - id: string (required, immutable, must equal logId, 1..128 chars)
+//   - loggedAt: int (required, mutable when toggling status, epoch ms > 0 and <= 4102444800000)
+//   - payloadJson: string (required, serialized MedicationIntakeLog JSON, 2..20480 chars / ~20 KB)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the caller is authenticated (Email/Password or Anonymous)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the authenticated caller owns the target user subtree
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Enforce strict schema: document contains ONLY the allowed keys
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Enforce required fields: document contains ALL required keys
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Prevent modification of immutable fields on update
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Validate document ID length bounds
+    function isValidDocId(docId) {
+      return docId is string &&
+             docId.size() >= 1 &&
+             docId.size() <= 128;
+    }
+
+    // Validate positive epoch millisecond timestamp (upper-bounded at 2100-01-01 UTC)
+    function isValidEpochMillis(ts) {
+      return ts is int &&
+             ts > 0 &&
+             ts <= 4102444800000;
+    }
+
+    // Validate serialized JSON string payload with resource-exhaustion cap
+    function isValidPayloadJson(payload, maxLen) {
+      return payload is string &&
+             payload.size() >= 2 &&
+             payload.size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Domain Validators (Called in BOTH create and update rules)
+    // ===============================================================
+
+    function isValidProfile(data, profileId) {
+      let allowed = ['id', 'updatedAt', 'payloadJson'];
+      return hasOnlyAllowedFields(allowed) &&
+             hasRequiredFields(allowed) &&
+             isValidDocId(profileId) &&
+             data.id is string &&
+             data.id == profileId &&
+             isValidEpochMillis(data.updatedAt) &&
+             isValidPayloadJson(data.payloadJson, 51200);
+    }
+
+    function isValidRecord(data, recordId) {
+      let allowed = ['id', 'updatedAt', 'payloadJson'];
+      return hasOnlyAllowedFields(allowed) &&
+             hasRequiredFields(allowed) &&
+             isValidDocId(recordId) &&
+             data.id is string &&
+             data.id == recordId &&
+             isValidEpochMillis(data.updatedAt) &&
+             isValidPayloadJson(data.payloadJson, 307200);
+    }
+
+    function isValidReminder(data, reminderId) {
+      let allowed = ['id', 'updatedAt', 'payloadJson'];
+      return hasOnlyAllowedFields(allowed) &&
+             hasRequiredFields(allowed) &&
+             isValidDocId(reminderId) &&
+             data.id is string &&
+             data.id == reminderId &&
+             isValidEpochMillis(data.updatedAt) &&
+             isValidPayloadJson(data.payloadJson, 51200);
+    }
+
+    function isValidIntakeLog(data, logId) {
+      let allowed = ['id', 'loggedAt', 'payloadJson'];
+      return hasOnlyAllowedFields(allowed) &&
+             hasRequiredFields(allowed) &&
+             isValidDocId(logId) &&
+             data.id is string &&
+             data.id == logId &&
+             isValidEpochMillis(data.loggedAt) &&
+             isValidPayloadJson(data.payloadJson, 20480);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Client does not store fields directly on users/{userId}; deny direct access
+      allow read, write: if false;
+
+      // Family health profiles (contains sensitive medical & BHYT info)
+      match /profiles/{profileId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidProfile(request.resource.data, profileId);
+        allow update: if isOwner(userId) &&
+                         isValidProfile(request.resource.data, profileId) &&
+                         areImmutableFieldsUnchanged(['id']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Scanned prescriptions & lab result records
+      match /records/{recordId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidRecord(request.resource.data, recordId);
+        allow update: if isOwner(userId) &&
+                         isValidRecord(request.resource.data, recordId) &&
+                         areImmutableFieldsUnchanged(['id']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Medication reminder schedules
+      match /reminders/{reminderId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidReminder(request.resource.data, reminderId);
+        allow update: if isOwner(userId) &&
+                         isValidReminder(request.resource.data, reminderId) &&
+                         areImmutableFieldsUnchanged(['id']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Medication intake adherence logs
+      match /intake_logs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidIntakeLog(request.resource.data, logId);
+        allow update: if isOwner(userId) &&
+                         isValidIntakeLog(request.resource.data, logId) &&
+                         areImmutableFieldsUnchanged(['id']);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ===============================================================
+    // Default Deny — Block all other paths and collections
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

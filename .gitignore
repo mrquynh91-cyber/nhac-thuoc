@@ -18,3 +18,4 @@ app/google-services.json
 *.jks
 *.keystore
 keystore-github-secrets.txt
+firebase-github-secret.txt
