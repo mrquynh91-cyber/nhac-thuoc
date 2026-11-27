@@ -114,12 +114,13 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
         val record = activeDetail!!
         RecordDetailScreen(
             record = record,
+            settings = settings,
             isChatReplying = isChatReplying,
             snackbarHostState = snackbarHostState,
             onBack = { vm.closeRecordDetail() },
             onDelete = { vm.deleteRecord(record.id) },
-            onAddMedicationReminder = { med ->
-                vm.addReminderFromMedication(med, record)
+            onSaveCustomReminder = { reminder ->
+                vm.saveReminder(reminder)
             },
             onAddAllReminders = {
                 vm.addAllRemindersFromRecord(record)

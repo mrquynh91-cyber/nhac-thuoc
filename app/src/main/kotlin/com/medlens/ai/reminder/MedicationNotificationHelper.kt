@@ -11,23 +11,20 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.medlens.ai.MainActivity
 import com.medlens.ai.data.MealTiming
+import com.medlens.ai.data.MedicationReminder
 
 object MedicationNotificationHelper {
     const val CHANNEL_ID = "medlens_medication_reminders"
     private const val CHANNEL_NAME = "Nhắc uống thuốc"
-    private const val CHANNEL_DESC = "Thông báo nhắc nhở uống thuốc đúng giờ hàng ngày"
+    private const val CHANNEL_DESC = "Thông báo nhắc nhở uống thuốc theo cữ kèm danh sách cách uống"
 
-    const val EXTRA_REMINDER_ID = "extra_reminder_id"
-    const val EXTRA_MED_NAME = "extra_med_name"
-    const val EXTRA_DOSAGE = "extra_dosage"
-    const val EXTRA_MEAL_TIMING = "extra_meal_timing"
     const val EXTRA_SCHEDULED_TIME = "extra_scheduled_time"
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+    const val EXTRA_IS_DEMO_TEST = "extra_is_demo_test"
 
-    const val ACTION_MARK_TAKEN = "com.medlens.ai.action.MARK_TAKEN"
-    const val ACTION_SNOOZE_15 = "com.medlens.ai.action.SNOOZE_15"
+    const val ACTION_MARK_GROUP_TAKEN = "com.medlens.ai.action.MARK_GROUP_TAKEN"
+    const val ACTION_SNOOZE_GROUP_15 = "com.medlens.ai.action.SNOOZE_GROUP_15"
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -39,6 +36,7 @@ object MedicationNotificationHelper {
         ).apply {
             description = CHANNEL_DESC
             enableVibration(true)
+            lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
         }
         manager.createNotificationChannel(channel)
     }
@@ -54,35 +52,50 @@ object MedicationNotificationHelper {
         }
     }
 
-    fun showReminderNotification(
+    fun createPopupIntent(
         context: Context,
-        reminderId: String,
-        medicationName: String,
-        dosage: String,
-        mealTiming: MealTiming,
-        scheduledTime: String
+        scheduledTime: String,
+        notificationId: Int,
+        isDemoTest: Boolean = false
+    ): Intent {
+        return Intent(context, MedicationAlarmPopupActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_SCHEDULED_TIME, scheduledTime)
+            putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+            putExtra(EXTRA_IS_DEMO_TEST, isDemoTest)
+        }
+    }
+
+    fun showGroupedReminderNotification(
+        context: Context,
+        scheduledTime: String,
+        remindersInSlot: List<MedicationReminder>,
+        isDemoTest: Boolean = false
     ): Boolean {
         ensureChannel(context)
         if (!hasNotificationPermission(context)) return false
+        if (remindersInSlot.isEmpty()) return false
 
-        val notificationId = "${reminderId}_$scheduledTime".hashCode()
+        val sorted = remindersInSlot.sortedBy { mealOrder(it.mealTiming) }
+        val notificationId = ("group_slot_$scheduledTime").hashCode()
 
-        val openAppIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val contentPending = PendingIntent.getActivity(
+        val popupIntent = createPopupIntent(
+            context = context,
+            scheduledTime = scheduledTime,
+            notificationId = notificationId,
+            isDemoTest = isDemoTest
+        )
+        val popupPending = PendingIntent.getActivity(
             context,
             notificationId,
-            openAppIntent,
+            popupIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val takenIntent = Intent(context, MedicationActionReceiver::class.java).apply {
-            action = ACTION_MARK_TAKEN
-            putExtra(EXTRA_REMINDER_ID, reminderId)
-            putExtra(EXTRA_MED_NAME, medicationName)
-            putExtra(EXTRA_DOSAGE, dosage)
-            putExtra(EXTRA_MEAL_TIMING, mealTiming.name)
+            action = ACTION_MARK_GROUP_TAKEN
             putExtra(EXTRA_SCHEDULED_TIME, scheduledTime)
             putExtra(EXTRA_NOTIFICATION_ID, notificationId)
         }
@@ -94,11 +107,7 @@ object MedicationNotificationHelper {
         )
 
         val snoozeIntent = Intent(context, MedicationActionReceiver::class.java).apply {
-            action = ACTION_SNOOZE_15
-            putExtra(EXTRA_REMINDER_ID, reminderId)
-            putExtra(EXTRA_MED_NAME, medicationName)
-            putExtra(EXTRA_DOSAGE, dosage)
-            putExtra(EXTRA_MEAL_TIMING, mealTiming.name)
+            action = ACTION_SNOOZE_GROUP_15
             putExtra(EXTRA_SCHEDULED_TIME, scheduledTime)
             putExtra(EXTRA_NOTIFICATION_ID, notificationId)
         }
@@ -109,21 +118,35 @@ object MedicationNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val contentText = "$dosage • ${mealTiming.labelVi} (Lịch $scheduledTime)"
+        val title = if (sorted.size == 1) {
+            "⏰ $scheduledTime • Uống ${sorted.first().medicationName}"
+        } else {
+            "⏰ $scheduledTime • Đến giờ uống ${sorted.size} loại thuốc"
+        }
+
+        val summaryLine = sorted.joinToString(", ") { it.medicationName }
+
+        val inboxStyle = NotificationCompat.InboxStyle()
+            .setBigContentTitle(title)
+            .setSummaryText("Chạm để mở bảng hướng dẫn uống chi tiết")
+
+        sorted.forEachIndexed { idx, r ->
+            val notePart = r.note.takeIf { it.isNotBlank() }?.let { " — ${it.take(40)}" }.orEmpty()
+            inboxStyle.addLine("${idx + 1}. ${r.medicationName} (${r.dosage}) • ${r.mealTiming.labelVi}$notePart")
+        }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Đến giờ uống thuốc: $medicationName")
-            .setContentText(contentText)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("$contentText\nBấm 'Đã uống' để ghi nhận lịch uống thuốc hôm nay.")
-            )
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentTitle(title)
+            .setContentText(summaryLine)
+            .setStyle(inboxStyle)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setContentIntent(contentPending)
-            .addAction(0, "Đã uống ✓", takenPending)
+            .setContentIntent(popupPending)
+            .setFullScreenIntent(popupPending, true)
+            .addAction(0, if (sorted.size > 1) "Đã uống tất cả ✓" else "Đã uống ✓", takenPending)
             .addAction(0, "Nhắc sau 15p", snoozePending)
             .build()
 
@@ -131,5 +154,12 @@ object MedicationNotificationHelper {
             NotificationManagerCompat.from(context).notify(notificationId, notification)
             true
         }.getOrDefault(false)
+    }
+
+    fun mealOrder(timing: MealTiming): Int = when (timing) {
+        MealTiming.BEFORE_MEAL -> 0
+        MealTiming.WITH_MEAL -> 1
+        MealTiming.AFTER_MEAL -> 2
+        MealTiming.ANYTIME -> 3
     }
 }

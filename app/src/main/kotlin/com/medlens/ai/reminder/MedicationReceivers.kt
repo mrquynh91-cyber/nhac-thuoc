@@ -7,34 +7,30 @@ import androidx.core.app.NotificationManagerCompat
 import com.medlens.ai.MedLensApplication
 import com.medlens.ai.data.IntakeStatus
 import com.medlens.ai.data.LocalMedicalStore
-import com.medlens.ai.data.MealTiming
 
 class MedicationAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val reminderId = intent.getStringExtra(MedicationNotificationHelper.EXTRA_REMINDER_ID) ?: return
-        val medName = intent.getStringExtra(MedicationNotificationHelper.EXTRA_MED_NAME) ?: "Thuốc theo đơn"
-        val dosage = intent.getStringExtra(MedicationNotificationHelper.EXTRA_DOSAGE) ?: "Theo chỉ định"
-        val mealName = intent.getStringExtra(MedicationNotificationHelper.EXTRA_MEAL_TIMING)
-            ?: MealTiming.AFTER_MEAL.name
-        val mealTiming = runCatching { MealTiming.valueOf(mealName) }.getOrDefault(MealTiming.AFTER_MEAL)
-        val scheduledTime = intent.getStringExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME) ?: "08:00"
+        val scheduledTime = intent.getStringExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME)
+            ?: return
         val isSnooze = intent.getBooleanExtra(MedicationReminderScheduler.EXTRA_IS_SNOOZE, false)
 
-        MedicationNotificationHelper.showReminderNotification(
-            context = context,
-            reminderId = reminderId,
-            medicationName = medName,
-            dosage = dosage,
-            mealTiming = mealTiming,
-            scheduledTime = scheduledTime
-        )
+        val store = (context.applicationContext as? MedLensApplication)?.localStore
+            ?: LocalMedicalStore(context.applicationContext)
 
-        if (!isSnooze) {
-            MedicationReminderScheduler(context).scheduleSingleTime(
-                reminderId = reminderId,
-                medicationName = medName,
-                dosage = dosage,
-                mealTiming = mealTiming,
+        val matchingReminders = store.reminders.value
+            .filter { it.isActive && it.times.contains(scheduledTime) }
+
+        if (matchingReminders.isNotEmpty()) {
+            MedicationNotificationHelper.showGroupedReminderNotification(
+                context = context,
+                scheduledTime = scheduledTime,
+                remindersInSlot = matchingReminders,
+                isDemoTest = false
+            )
+        }
+
+        if (!isSnooze && matchingReminders.isNotEmpty()) {
+            MedicationReminderScheduler(context).scheduleTimeSlot(
                 timeStr = scheduledTime,
                 forceNextDay = true
             )
@@ -44,33 +40,28 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
 
 class MedicationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val reminderId = intent.getStringExtra(MedicationNotificationHelper.EXTRA_REMINDER_ID) ?: return
-        val medName = intent.getStringExtra(MedicationNotificationHelper.EXTRA_MED_NAME) ?: "Thuốc"
-        val dosage = intent.getStringExtra(MedicationNotificationHelper.EXTRA_DOSAGE) ?: ""
-        val mealName = intent.getStringExtra(MedicationNotificationHelper.EXTRA_MEAL_TIMING)
-            ?: MealTiming.AFTER_MEAL.name
-        val mealTiming = runCatching { MealTiming.valueOf(mealName) }.getOrDefault(MealTiming.AFTER_MEAL)
-        val scheduledTime = intent.getStringExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME) ?: "08:00"
+        val scheduledTime = intent.getStringExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME)
+            ?: return
         val notificationId = intent.getIntExtra(MedicationNotificationHelper.EXTRA_NOTIFICATION_ID, 0)
 
         when (intent.action) {
-            MedicationNotificationHelper.ACTION_MARK_TAKEN -> {
+            MedicationNotificationHelper.ACTION_MARK_GROUP_TAKEN -> {
                 val store = (context.applicationContext as? MedLensApplication)?.localStore
                     ?: LocalMedicalStore(context.applicationContext)
-                store.logMedicationIntake(
-                    reminderId = reminderId,
-                    medicationName = medName,
-                    scheduledTime = scheduledTime,
-                    status = IntakeStatus.TAKEN
-                )
+                val matching = store.reminders.value.filter { it.isActive && it.times.contains(scheduledTime) }
+                matching.forEach { reminder ->
+                    store.logMedicationIntake(
+                        reminderId = reminder.id,
+                        medicationName = reminder.medicationName,
+                        scheduledTime = scheduledTime,
+                        status = IntakeStatus.TAKEN,
+                        profileId = reminder.profileId
+                    )
+                }
             }
 
-            MedicationNotificationHelper.ACTION_SNOOZE_15 -> {
-                MedicationReminderScheduler(context.applicationContext).scheduleSnooze(
-                    reminderId = reminderId,
-                    medicationName = medName,
-                    dosage = dosage,
-                    mealTiming = mealTiming,
+            MedicationNotificationHelper.ACTION_SNOOZE_GROUP_15 -> {
+                MedicationReminderScheduler(context.applicationContext).scheduleGroupSnooze(
                     scheduledTime = scheduledTime,
                     delayMinutes = 15
                 )

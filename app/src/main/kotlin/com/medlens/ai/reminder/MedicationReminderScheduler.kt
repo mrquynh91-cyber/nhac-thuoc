@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import com.medlens.ai.data.MealTiming
 import com.medlens.ai.data.MedicationReminder
 import java.util.Calendar
 
@@ -13,73 +12,55 @@ class MedicationReminderScheduler(private val context: Context) {
     private val alarmManager: AlarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
+    private val prefs = context.getSharedPreferences("medlens_alarm_slots", Context.MODE_PRIVATE)
+
+    /**
+     * Groups all active reminders by unique HH:mm time slot so multiple medications
+     * taken at the same meal/hour fire ONE single grouped alarm & checklist popup!
+     */
     fun rescheduleAll(reminders: List<MedicationReminder>) {
-        reminders.forEach { reminder ->
-            if (reminder.isActive) {
-                scheduleReminder(reminder)
-            } else {
-                cancelReminder(reminder)
-            }
+        val oldSlots = prefs.getStringSet(KEY_SCHEDULED_SLOTS, emptySet()).orEmpty()
+        val activeSlots = reminders
+            .filter { it.isActive }
+            .flatMap { it.times }
+            .map { it.trim() }
+            .filter { parseTime(it) != null }
+            .toSet()
+
+        // Cancel slots that no longer have active medications
+        (oldSlots - activeSlots).forEach { removedSlot ->
+            cancelTimeSlot(removedSlot)
         }
+
+        // Schedule 1 grouped daily alarm per unique active HH:mm slot
+        activeSlots.forEach { slotTime ->
+            scheduleTimeSlot(slotTime, forceNextDay = false)
+        }
+
+        prefs.edit().putStringSet(KEY_SCHEDULED_SLOTS, activeSlots).apply()
     }
 
-    fun scheduleReminder(reminder: MedicationReminder) {
-        if (!reminder.isActive) {
-            cancelReminder(reminder)
-            return
-        }
-        reminder.times.forEach { timeStr ->
-            scheduleSingleTime(
-                reminderId = reminder.id,
-                medicationName = reminder.medicationName,
-                dosage = reminder.dosage,
-                mealTiming = reminder.mealTiming,
-                timeStr = timeStr,
-                forceNextDay = false
-            )
-        }
-    }
-
-    fun scheduleSingleTime(
-        reminderId: String,
-        medicationName: String,
-        dosage: String,
-        mealTiming: MealTiming,
-        timeStr: String,
-        forceNextDay: Boolean = false
-    ) {
+    fun scheduleTimeSlot(timeStr: String, forceNextDay: Boolean = false) {
         val (hour, minute) = parseTime(timeStr) ?: return
         val triggerAt = nextTriggerMillis(hour, minute, forceNextDay)
-
-        val pendingIntent = buildAlarmPendingIntent(
-            reminderId = reminderId,
-            medicationName = medicationName,
-            dosage = dosage,
-            mealTiming = mealTiming,
-            timeStr = timeStr
-        )
-
+        val pendingIntent = buildSlotPendingIntent(timeStr)
         scheduleExactOrFallback(triggerAt, pendingIntent)
     }
 
-    fun scheduleSnooze(
-        reminderId: String,
-        medicationName: String,
-        dosage: String,
-        mealTiming: MealTiming,
+    fun cancelTimeSlot(timeStr: String) {
+        alarmManager.cancel(buildSlotPendingIntent(timeStr))
+    }
+
+    fun scheduleGroupSnooze(
         scheduledTime: String,
         delayMinutes: Int = 15
     ) {
         val triggerAt = System.currentTimeMillis() + delayMinutes * 60_000L
         val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
-            putExtra(MedicationNotificationHelper.EXTRA_REMINDER_ID, reminderId)
-            putExtra(MedicationNotificationHelper.EXTRA_MED_NAME, medicationName)
-            putExtra(MedicationNotificationHelper.EXTRA_DOSAGE, dosage)
-            putExtra(MedicationNotificationHelper.EXTRA_MEAL_TIMING, mealTiming.name)
             putExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME, scheduledTime)
             putExtra(EXTRA_IS_SNOOZE, true)
         }
-        val requestCode = ("snooze_${reminderId}_$scheduledTime").hashCode()
+        val requestCode = ("snooze_slot_$scheduledTime").hashCode()
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -87,19 +68,6 @@ class MedicationReminderScheduler(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         scheduleExactOrFallback(triggerAt, pendingIntent)
-    }
-
-    fun cancelReminder(reminder: MedicationReminder) {
-        reminder.times.forEach { timeStr ->
-            val pendingIntent = buildAlarmPendingIntent(
-                reminderId = reminder.id,
-                medicationName = reminder.medicationName,
-                dosage = reminder.dosage,
-                mealTiming = reminder.mealTiming,
-                timeStr = timeStr
-            )
-            alarmManager.cancel(pendingIntent)
-        }
     }
 
     private fun scheduleExactOrFallback(triggerAtMillis: Long, pendingIntent: PendingIntent) {
@@ -131,22 +99,12 @@ class MedicationReminderScheduler(private val context: Context) {
         }
     }
 
-    private fun buildAlarmPendingIntent(
-        reminderId: String,
-        medicationName: String,
-        dosage: String,
-        mealTiming: MealTiming,
-        timeStr: String
-    ): PendingIntent {
+    private fun buildSlotPendingIntent(timeStr: String): PendingIntent {
         val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
-            putExtra(MedicationNotificationHelper.EXTRA_REMINDER_ID, reminderId)
-            putExtra(MedicationNotificationHelper.EXTRA_MED_NAME, medicationName)
-            putExtra(MedicationNotificationHelper.EXTRA_DOSAGE, dosage)
-            putExtra(MedicationNotificationHelper.EXTRA_MEAL_TIMING, mealTiming.name)
             putExtra(MedicationNotificationHelper.EXTRA_SCHEDULED_TIME, timeStr)
             putExtra(EXTRA_IS_SNOOZE, false)
         }
-        val requestCode = ("alarm_${reminderId}_$timeStr").hashCode()
+        val requestCode = ("alarm_slot_$timeStr").hashCode()
         return PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -156,6 +114,7 @@ class MedicationReminderScheduler(private val context: Context) {
     }
 
     companion object {
+        private const val KEY_SCHEDULED_SLOTS = "scheduled_time_slots"
         const val EXTRA_IS_SNOOZE = "extra_is_snooze"
 
         fun parseTime(timeStr: String): Pair<Int, Int>? {

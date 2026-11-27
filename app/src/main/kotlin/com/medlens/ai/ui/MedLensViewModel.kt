@@ -437,24 +437,23 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
                 dosage = med.dosage.ifBlank { "Theo đơn" },
                 mealTiming = med.mealTiming,
                 times = mappedTimes.distinct().sorted(),
-                note = med.categoryShort.ifBlank { med.purposePlainVietnamese.take(100) },
+                note = listOf(med.sideEffectsWarning, med.categoryShort)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" • ")
+                    .ifBlank { med.purposePlainVietnamese.take(100) },
                 sourceRecordId = record.id,
                 isActive = true
             )
             localStore.upsertReminder(reminder)
-            scheduler.scheduleReminder(reminder)
         }
+        scheduler.rescheduleAll(localStore.reminders.value)
         _snackbarMessage.value = "✅ Đã tạo thành công ${record.medications.size} lịch nhắc uống thuốc!"
         triggerAutoSyncIfReady()
     }
 
     fun saveReminder(reminder: MedicationReminder, notifyUser: Boolean = true) {
         localStore.upsertReminder(reminder)
-        if (reminder.isActive) {
-            scheduler.scheduleReminder(reminder)
-        } else {
-            scheduler.cancelReminder(reminder)
-        }
+        scheduler.rescheduleAll(localStore.reminders.value)
         if (notifyUser) {
             _snackbarMessage.value =
                 "✅ Đã lưu lịch nhắc uống thuốc: ${reminder.medicationName} (${reminder.times.joinToString(", ")})"
@@ -473,8 +472,8 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun deleteReminder(reminder: MedicationReminder) {
-        scheduler.cancelReminder(reminder)
         localStore.deleteReminder(reminder.id)
+        scheduler.rescheduleAll(localStore.reminders.value)
         _snackbarMessage.value = "Đã xóa lịch nhắc ${reminder.medicationName}"
     }
 
@@ -494,18 +493,70 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun sendTestNotification() {
-        val posted = MedicationNotificationHelper.showReminderNotification(
-            context = app,
-            reminderId = "demo_test_notification",
-            medicationName = "Vitamin C 500mg (${activeProfile.value.name})",
-            dosage = "1 viên",
-            mealTiming = MealTiming.AFTER_MEAL,
-            scheduledTime = settings.value.morningTime
+        val activeList = localStore.reminders.value.filter { it.isActive }
+        val targetSlot = activeList
+            .flatMap { it.times }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+            ?: "09:00"
+
+        val inSlot = activeList.filter { it.times.contains(targetSlot) }
+        val demoFallback = listOf(
+            MedicationReminder(
+                id = "demo_1",
+                profileId = activeProfile.value.id,
+                medicationName = "Esomeprazole 40mg",
+                dosage = "1 viên",
+                mealTiming = MealTiming.BEFORE_MEAL,
+                times = listOf(targetSlot),
+                note = "Nuốt nguyên viên trước ăn 30 phút"
+            ),
+            MedicationReminder(
+                id = "demo_2",
+                profileId = activeProfile.value.id,
+                medicationName = "Getinomide 25mg",
+                dosage = "1 viên",
+                mealTiming = MealTiming.WITH_MEAL,
+                times = listOf(targetSlot),
+                note = "Uống đúng giờ mỗi ngày, không bỏ liều"
+            ),
+            MedicationReminder(
+                id = "demo_3",
+                profileId = activeProfile.value.id,
+                medicationName = "Bổ gan / Vitamin",
+                dosage = "1 viên",
+                mealTiming = MealTiming.AFTER_MEAL,
+                times = listOf(targetSlot),
+                note = "Uống ngay sau ăn no"
+            )
         )
+
+        val medsToShow = inSlot.ifEmpty { demoFallback }
+        val isDemo = inSlot.isEmpty()
+
+        val posted = MedicationNotificationHelper.showGroupedReminderNotification(
+            context = app,
+            scheduledTime = targetSlot,
+            remindersInSlot = medsToShow,
+            isDemoTest = isDemo
+        )
+
+        // Immediately launch the full-screen grouped checklist popup so user can preview it right now!
+        val notifId = ("group_slot_$targetSlot").hashCode()
+        val popupIntent = MedicationNotificationHelper.createPopupIntent(
+            context = app,
+            scheduledTime = targetSlot,
+            notificationId = notifId,
+            isDemoTest = isDemo
+        )
+        runCatching { app.startActivity(popupIntent) }
+
         _snackbarMessage.value = if (posted) {
-            "Đã gửi thông báo nhắc thuốc thử! Kiểm tra thanh thông báo."
+            "Đã mở Popup & gửi thông báo gom nhóm cữ $targetSlot (${medsToShow.size} thuốc)!"
         } else {
-            "Chưa có quyền gửi thông báo. Hãy cấp quyền Thông báo trước."
+            "Đã mở Popup xem trước! Hãy cấp quyền Thông báo để nhận chuông khi tắt màn hình."
         }
     }
 

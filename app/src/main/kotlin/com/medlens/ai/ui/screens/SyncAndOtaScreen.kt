@@ -85,6 +85,7 @@ import com.medlens.ai.ota.OtaReleaseInfo
 import com.medlens.ai.ota.OtaUpdateState
 import com.medlens.ai.reminder.MedicationNotificationHelper
 import com.medlens.ai.reminder.MedicationReminderScheduler
+import com.medlens.ai.ui.components.AddEditMedicationReminderDialog
 import com.medlens.ai.ui.theme.AlertRed
 import com.medlens.ai.ui.theme.AlertRedBg
 import com.medlens.ai.ui.theme.InfoBlue
@@ -831,7 +832,7 @@ fun SyncAndOtaScreen(
     }
 
     if (showCreateReminder || editingReminder != null) {
-        QuickAddEditReminderDialog(
+        AddEditMedicationReminderDialog(
             profileId = activeProfile.id,
             initial = editingReminder,
             defaultTimes = listOf(settings.morningTime, settings.noonTime, settings.afternoonTime, settings.eveningTime),

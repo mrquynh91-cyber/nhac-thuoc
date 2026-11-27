@@ -77,11 +77,13 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.medlens.ai.data.AppSettings
 import com.medlens.ai.data.DaySlot
 import com.medlens.ai.data.IndicatorStatus
 import com.medlens.ai.data.LabIndicator
 import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.data.MedicationItem
+import com.medlens.ai.data.MedicationReminder
 import com.medlens.ai.data.RecordChatMessage
 import com.medlens.ai.ui.theme.AlertRed
 import com.medlens.ai.ui.theme.AlertRedBg
@@ -326,7 +328,7 @@ fun MedicationCard(
                 ) {
                     Icon(Icons.Default.AlarmAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Nhắc thuốc này")
+                    Text("Chọn giờ & Nhắc")
                 }
             }
         }
@@ -437,11 +439,12 @@ fun MedicalDisclaimerCard(disclaimer: String) {
 @Composable
 fun RecordDetailScreen(
     record: MedicalRecord,
+    settings: AppSettings,
     isChatReplying: Boolean,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onDelete: () -> Unit,
-    onAddMedicationReminder: (MedicationItem) -> Unit,
+    onSaveCustomReminder: (MedicationReminder) -> Unit,
     onAddAllReminders: () -> Unit,
     onSendChatQuestion: (String) -> Unit,
     onShowMessage: (String) -> Unit
@@ -449,6 +452,7 @@ fun RecordDetailScreen(
     val clipboard = LocalClipboardManager.current
     var showNormalIndicators by remember(record.id) { mutableStateOf(false) }
     var chatInput by remember { mutableStateOf("") }
+    var pendingMedForTimePicker by remember { mutableStateOf<MedicationItem?>(null) }
 
     // Voice input (Vietnamese Speech-to-Text)
     val voiceLauncher = rememberLauncherForActivityResult(
@@ -673,7 +677,7 @@ fun RecordDetailScreen(
                 items(record.medications) { med ->
                     MedicationCard(
                         medication = med,
-                        onCreateReminder = { onAddMedicationReminder(med) }
+                        onCreateReminder = { pendingMedForTimePicker = med }
                     )
                 }
             }
@@ -904,6 +908,39 @@ fun RecordDetailScreen(
                 MedicalDisclaimerCard(record.medicalDisclaimer)
             }
         }
+    }
+
+    pendingMedForTimePicker?.let { med ->
+        val defaultNote = listOf(med.sideEffectsWarning, med.categoryShort)
+            .filter { it.isNotBlank() }
+            .joinToString(" • ")
+            .ifBlank { med.purposePlainVietnamese.take(120) }
+        val prefilled = MedicationReminder(
+            id = "",
+            profileId = record.profileId,
+            medicationName = med.name,
+            dosage = med.dosage.ifBlank { "Theo đơn" },
+            mealTiming = med.mealTiming,
+            times = med.suggestedReminderTimes.ifEmpty { listOf("09:00") },
+            note = defaultNote,
+            sourceRecordId = record.id,
+            isActive = true
+        )
+        AddEditMedicationReminderDialog(
+            profileId = record.profileId,
+            initial = prefilled,
+            defaultTimes = listOf(
+                settings.morningTime,
+                settings.noonTime,
+                settings.afternoonTime,
+                settings.eveningTime
+            ),
+            onDismiss = { pendingMedForTimePicker = null },
+            onSave = { saved ->
+                onSaveCustomReminder(saved)
+                pendingMedForTimePicker = null
+            }
+        )
     }
 }
 
