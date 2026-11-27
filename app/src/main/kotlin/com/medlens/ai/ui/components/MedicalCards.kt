@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlarmAdd
 import androidx.compose.material.icons.filled.AlarmOn
@@ -42,7 +43,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HealthAndSafety
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Mic
@@ -609,12 +609,12 @@ fun RecordDetailScreen(
         }
     }
 
-    // Auto-scroll to Q&A section when user sends a question or AI replies
+    // Auto-scroll smoothly to the bottom of Q&A section when user sends a question or AI replies
     LaunchedEffect(record.chatHistory.size, isChatReplying) {
         if (record.chatHistory.isNotEmpty() || isChatReplying) {
             val totalItems = listState.layoutInfo.totalItemsCount
             if (totalItems > 0) {
-                listState.animateScrollToItem((totalItems - 2).coerceAtLeast(0))
+                listState.animateScrollToItem((totalItems - 1).coerceAtLeast(0))
             }
         }
     }
@@ -1003,7 +1003,7 @@ fun RecordDetailScreen(
                 }
             }
 
-            // Suggested Smart Questions for the Doctor
+            // Suggested Smart Questions for the Doctor (1-tap sends directly to AI Q&A and scrolls down!)
             if (record.suggestedDoctorQuestions.isNotEmpty()) {
                 item {
                     Card(
@@ -1019,7 +1019,7 @@ fun RecordDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.HelpOutline, contentDescription = null, tint = InfoBlue)
+                                    Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = InfoBlue)
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Gợi ý câu hỏi cho bác sĩ",
@@ -1043,12 +1043,48 @@ fun RecordDetailScreen(
                                     )
                                 }
                             }
-                            record.suggestedDoctorQuestions.forEachIndexed { idx, q ->
-                                Text(
-                                    text = "${idx + 1}. $q",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(vertical = 3.dp)
-                                )
+                            Text(
+                                text = "Bấm vào từng câu hỏi để hỏi Trợ lý AI trả lời ngay:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MutedText
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                record.suggestedDoctorQuestions.forEachIndexed { idx, q ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surface,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, InfoBlue.copy(alpha = 0.28f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable(enabled = !isChatReplying) {
+                                                keyboardController?.hide()
+                                                onSendChatQuestion(q)
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "${idx + 1}. $q",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                                contentDescription = "Hỏi AI câu này",
+                                                tint = TealPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
