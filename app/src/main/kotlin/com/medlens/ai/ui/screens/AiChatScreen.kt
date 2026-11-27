@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -40,10 +41,11 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +54,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -186,86 +190,116 @@ fun AiChatScreen(
             .fillMaxSize()
             .imePadding()
     ) {
-        // Fixed Header — stays pinned at the top even when keyboard is open
+        // Fixed Compact Header — single clean bar (record selector tucked into dropdown, no 2nd chip bar)
+        val focusedRecord = profileRecords.firstOrNull { it.id == focusedRecordId }
+        var contextMenuExpanded by remember { mutableStateOf(false) }
+
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(TealLightContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = TealPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Hỏi đáp Gemini AI",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = "Hồ sơ: ${activeProfile.name} • $geminiModel",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MutedText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(TealLightContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = TealPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                    if (messages.isNotEmpty()) {
-                        IconButton(onClick = onClearChat) {
-                            Icon(
-                                Icons.Default.DeleteSweep,
-                                contentDescription = "Cuộc trò chuyện mới",
-                                tint = MutedText
-                            )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Hỏi đáp Gemini AI",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        Box {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable(enabled = profileRecords.isNotEmpty()) {
+                                    contextMenuExpanded = true
+                                }
+                            ) {
+                                Text(
+                                    text = if (focusedRecord != null) {
+                                        "Phiếu: ${focusedRecord.title}"
+                                    } else {
+                                        "Hồ sơ ${activeProfile.name} • $geminiModel"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (focusedRecord != null) TealPrimary else MutedText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (profileRecords.isNotEmpty()) {
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "Chọn phiếu khám",
+                                        tint = MutedText,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = contextMenuExpanded,
+                                onDismissRequest = { contextMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Toàn bộ hồ sơ ${activeProfile.name}",
+                                            fontWeight = if (focusedRecordId == null) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        focusedRecordId = null
+                                        contextMenuExpanded = false
+                                    }
+                                )
+                                profileRecords.take(6).forEach { rec ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "Ghim phiếu: ${rec.title}",
+                                                fontWeight = if (focusedRecordId == rec.id) FontWeight.Bold else FontWeight.Normal,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        onClick = {
+                                            focusedRecordId = rec.id
+                                            contextMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-
-                if (profileRecords.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        item {
-                            FilterChip(
-                                selected = focusedRecordId == null,
-                                onClick = { focusedRecordId = null },
-                                label = { Text("Toàn bộ hồ sơ ${activeProfile.name}") }
-                            )
-                        }
-                        items(profileRecords.take(5), key = { it.id }) { rec ->
-                            FilterChip(
-                                selected = focusedRecordId == rec.id,
-                                onClick = {
-                                    focusedRecordId = if (focusedRecordId == rec.id) null else rec.id
-                                },
-                                label = {
-                                    Text(
-                                        text = rec.title,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            )
-                        }
+                if (messages.isNotEmpty()) {
+                    IconButton(onClick = onClearChat) {
+                        Icon(
+                            Icons.Default.DeleteSweep,
+                            contentDescription = "Cuộc trò chuyện mới",
+                            tint = MutedText
+                        )
                     }
                 }
             }
@@ -555,15 +589,22 @@ private fun formatMedicalMarkdown(raw: String): AnnotatedString {
     val normalized = raw
         .replace(Regex("(?m)^\\s*\\*\\s+"), "• ")
         .replace(Regex("(?m)^\\s*-\\s+"), "• ")
+    val tokenRegex = Regex("\\*\\*(.+?)\\*\\*|\\*([^*\n]+?)\\*")
     return buildAnnotatedString {
         var idx = 0
-        val boldRegex = Regex("\\*\\*(.+?)\\*\\*")
-        for (match in boldRegex.findAll(normalized)) {
+        for (match in tokenRegex.findAll(normalized)) {
             if (match.range.first > idx) {
                 append(normalized.substring(idx, match.range.first))
             }
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                append(match.groupValues[1])
+            val boldText = match.groups[1]?.value
+            val italicText = match.groups[2]?.value
+            when {
+                boldText != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(boldText)
+                }
+                italicText != null -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append(italicText)
+                }
             }
             idx = match.range.last + 1
         }
