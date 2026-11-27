@@ -4,8 +4,12 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -30,6 +34,8 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Restore
@@ -60,10 +66,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.medlens.ai.BuildConfig
 import com.medlens.ai.data.AppSettings
@@ -83,6 +92,7 @@ import com.medlens.ai.ui.theme.InfoBlueBg
 import com.medlens.ai.ui.theme.MutedText
 import com.medlens.ai.ui.theme.NormalGreen
 import com.medlens.ai.ui.theme.NormalGreenBg
+import com.medlens.ai.ui.theme.TealLightContainer
 import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
 import com.medlens.ai.ui.theme.WarningAmberBg
@@ -184,23 +194,47 @@ fun SyncAndOtaScreen(
         }
     }
 
+    // Collapsible sections state — all collapsed by default for a clean screen
+    var expandedReminder by remember { mutableStateOf(false) }
+    var expandedGemini by remember { mutableStateOf(false) }
+    var expandedFirebase by remember { mutableStateOf(false) }
+    var expandedBackup by remember { mutableStateOf(false) }
+    var expandedOta by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text(
-                text = "Cài đặt, Nhắc thuốc & OTA",
-                style = MaterialTheme.typography.headlineSmall
-            )
+            Column {
+                Text(
+                    text = "Cài đặt, Nhắc thuốc & OTA",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Bấm vào từng mục bên dưới để mở rộng hoặc thu gọn",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MutedText
+                )
+            }
         }
 
         // 1. Medication Reminders & Default Slot Times
         item {
+            val reminderSubtitle = if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                "Chưa cấp quyền thông báo • ${reminders.size} lịch thuốc"
+            } else {
+                "${reminders.size} lịch thuốc • Sáng ${settings.morningTime}, Tối ${settings.eveningTime}"
+            }
             SectionCard(
                 title = "Nhắc uống thuốc (${activeProfile.name})",
-                icon = Icons.Default.Alarm
+                subtitle = reminderSubtitle,
+                subtitleColor = if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) WarningAmber else MutedText,
+                icon = Icons.Default.Alarm,
+                expanded = expandedReminder,
+                onToggle = { expandedReminder = !expandedReminder }
             ) {
                 if (!hasNotifPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     Surface(
@@ -377,9 +411,14 @@ fun SyncAndOtaScreen(
 
         // 2. Gemini AI Card
         item {
+            val hasKey = settings.geminiApiKey.isNotBlank()
             SectionCard(
                 title = "Tích hợp AI Gemini",
-                icon = Icons.Default.AutoAwesome
+                subtitle = if (hasKey) "Đã có API Key • ${settings.geminiModel}" else "Chưa nhập API Key • Bấm để cài đặt",
+                subtitleColor = if (hasKey) NormalGreen else WarningAmber,
+                icon = Icons.Default.AutoAwesome,
+                expanded = expandedGemini,
+                onToggle = { expandedGemini = !expandedGemini }
             ) {
                 OutlinedTextField(
                     value = apiKeyInput,
@@ -425,9 +464,18 @@ fun SyncAndOtaScreen(
 
         // 3. Firebase Sync Card
         item {
+            val firebaseSubtitle = when {
+                cloudSyncState.user != null -> "Đã kết nối: ${cloudSyncState.user.email ?: "Tài khoản khách"}"
+                cloudSyncState.isFirebaseConfigured -> "Sẵn sàng đăng nhập đồng bộ đám mây"
+                else -> "Đang chạy Offline • Chưa gắn google-services.json"
+            }
             SectionCard(
-                title = "Đồng bộ Firebase (Auth + Firestore + Storage)",
-                icon = Icons.Default.CloudSync
+                title = "Đồng bộ Firebase",
+                subtitle = firebaseSubtitle,
+                subtitleColor = if (cloudSyncState.user != null) NormalGreen else MutedText,
+                icon = Icons.Default.CloudSync,
+                expanded = expandedFirebase,
+                onToggle = { expandedFirebase = !expandedFirebase }
             ) {
                 val statusBg = if (cloudSyncState.isFirebaseConfigured) NormalGreenBg else WarningAmberBg
                 val statusFg = if (cloudSyncState.isFirebaseConfigured) NormalGreen else WarningAmber
@@ -562,8 +610,11 @@ fun SyncAndOtaScreen(
         // 4. Local JSON Backup & Restore
         item {
             SectionCard(
-                title = "Sao lưu & Khôi phục cục bộ (JSON)",
-                icon = Icons.Default.Backup
+                title = "Sao lưu & Khôi phục (JSON)",
+                subtitle = "Xuất hoặc khôi phục toàn bộ hồ sơ & lịch thuốc",
+                icon = Icons.Default.Backup,
+                expanded = expandedBackup,
+                onToggle = { expandedBackup = !expandedBackup }
             ) {
                 Text(
                     text = "Xuất toàn bộ hồ sơ gia đình, phiếu khám, biểu đồ và lịch nhắc thuốc thành 1 file JSON.",
@@ -600,9 +651,28 @@ fun SyncAndOtaScreen(
 
         // 5. GitHub Releases OTA Updater
         item {
+            val (otaSubtitle, otaSubtitleColor) = when (otaState) {
+                is OtaUpdateState.UpdateAvailable ->
+                    "v${BuildConfig.VERSION_NAME} → Có bản mới ${otaState.release.tagName}!" to WarningAmber
+                is OtaUpdateState.Downloading ->
+                    "Đang tải ${otaState.release.tagName} (${otaState.progressPercent}%)" to InfoBlue
+                is OtaUpdateState.ReadyToInstall ->
+                    "Đã tải xong ${otaState.release.tagName} • Bấm để cài" to NormalGreen
+                is OtaUpdateState.UpToDate ->
+                    "v${BuildConfig.VERSION_NAME} • Đang là bản mới nhất" to NormalGreen
+                else ->
+                    "Phiên bản v${BuildConfig.VERSION_NAME} • ${settings.githubOtaRepo.ifBlank { "Chưa cấu hình repo" }}" to MutedText
+            }
+            val isOtaExpanded = expandedOta ||
+                otaState is OtaUpdateState.Downloading ||
+                otaState is OtaUpdateState.ReadyToInstall
             SectionCard(
-                title = "Cập nhật OTA qua GitHub Releases",
-                icon = Icons.Default.SystemUpdate
+                title = "Cập nhật OTA qua GitHub",
+                subtitle = otaSubtitle,
+                subtitleColor = otaSubtitleColor,
+                icon = Icons.Default.SystemUpdate,
+                expanded = isOtaExpanded,
+                onToggle = { expandedOta = !expandedOta }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -983,23 +1053,72 @@ private fun OtaStatusBlock(
 @Composable
 private fun SectionCard(
     title: String,
+    subtitle: String,
+    subtitleColor: Color = MutedText,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    expanded: Boolean,
+    onToggle: () -> Unit,
     content: @Composable () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (expanded) TealPrimary.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = TealPrimary)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() }
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TealLightContainer.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = TealPrimary)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
-                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Thu gọn" else "Mở rộng",
+                    tint = MutedText
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            content()
+
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                ) {
+                    content()
+                }
+            }
         }
     }
 }
