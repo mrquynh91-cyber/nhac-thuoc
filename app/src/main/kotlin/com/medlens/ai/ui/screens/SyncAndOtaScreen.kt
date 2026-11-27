@@ -149,12 +149,17 @@ fun SyncAndOtaScreen(
     var showCreateReminder by remember { mutableStateOf(false) }
     var editingReminder by remember { mutableStateOf<MedicationReminder?>(null) }
 
-    // Gemini inputs
+    // Gemini inputs (keep built-in proxy credentials hidden unless user expands advanced override)
     var apiKeyInput by remember(settings.geminiApiKey) { mutableStateOf(settings.geminiApiKey) }
-    var proxyUrlInput by remember(settings.geminiProxyUrl) { mutableStateOf(settings.geminiProxyUrl) }
-    var proxyTokenInput by remember(settings.geminiProxyToken) { mutableStateOf(settings.geminiProxyToken) }
+    var proxyUrlInput by remember(settings.geminiProxyUrl) {
+        mutableStateOf(if (settings.geminiProxyUrl == BuildConfig.GEMINI_PROXY_URL) "" else settings.geminiProxyUrl)
+    }
+    var proxyTokenInput by remember(settings.geminiProxyToken) {
+        mutableStateOf(if (settings.geminiProxyToken == BuildConfig.GEMINI_PROXY_TOKEN) "" else settings.geminiProxyToken)
+    }
     var selectedModel by remember(settings.geminiModel) { mutableStateOf(settings.geminiModel) }
     var showApiKey by remember { mutableStateOf(false) }
+    var showAdvancedProxy by remember { mutableStateOf(false) }
 
     // Firebase auth inputs
     var emailInput by remember { mutableStateOf("") }
@@ -461,45 +466,63 @@ fun SyncAndOtaScreen(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = proxyUrlInput,
-                    onValueChange = { proxyUrlInput = it },
-                    label = { Text("Cloudflare Worker Proxy URL (dùng chung cho nhiều người)") },
-                    placeholder = { Text("https://hieudon-gemini-proxy.xxx.workers.dev") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = proxyTokenInput,
-                    onValueChange = { proxyTokenInput = it },
-                    label = { Text("Mã bảo vệ Proxy (APP_CLIENT_TOKEN — tuỳ chọn)") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = apiKeyInput,
-                    onValueChange = { apiKeyInput = it },
-                    label = { Text("Hoặc Gemini API Key cá nhân (để trống để dùng Proxy)") },
-                    placeholder = { Text("AIzaSy...") },
-                    singleLine = true,
-                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                            Icon(
-                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Hiện/ẩn key"
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
                 Spacer(Modifier.height(10.dp))
+                TextButton(
+                    onClick = { showAdvancedProxy = !showAdvancedProxy },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        if (showAdvancedProxy) "Ẩn cấu hình nâng cao ▲"
+                        else "Dùng API Key / Proxy riêng (tuỳ chọn) ▼"
+                    )
+                }
+
+                AnimatedVisibility(visible = showAdvancedProxy) {
+                    Column {
+                        OutlinedTextField(
+                            value = apiKeyInput,
+                            onValueChange = { apiKeyInput = it },
+                            label = { Text("Gemini API Key cá nhân (để trống = dùng máy chủ chung)") },
+                            placeholder = { Text("AIzaSy...") },
+                            singleLine = true,
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(
+                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = "Hiện/ẩn key"
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = proxyUrlInput,
+                            onValueChange = { proxyUrlInput = it },
+                            label = { Text("Proxy URL riêng (để trống = mặc định)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = proxyTokenInput,
+                            onValueChange = { proxyTokenInput = it },
+                            label = { Text("Proxy Token riêng (để trống = mặc định)") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+
                 Button(
-                    onClick = { onSaveGeminiConfig(apiKeyInput, proxyUrlInput, proxyTokenInput, selectedModel) },
+                    onClick = {
+                        val effectiveProxyUrl = proxyUrlInput.trim().ifEmpty { BuildConfig.GEMINI_PROXY_URL }
+                        val effectiveProxyToken = proxyTokenInput.trim().ifEmpty { BuildConfig.GEMINI_PROXY_TOKEN }
+                        onSaveGeminiConfig(apiKeyInput, effectiveProxyUrl, effectiveProxyToken, selectedModel)
+                    },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Lưu cấu hình Gemini")

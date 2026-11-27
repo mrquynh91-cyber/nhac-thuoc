@@ -38,7 +38,7 @@ android {
     versionName = appVersionName
 
     buildConfigField("String", "GEMINI_API_KEY", "\"${readConfig("GEMINI_API_KEY")}\"")
-    buildConfigField("String", "GEMINI_PROXY_URL", "\"${readConfig("GEMINI_PROXY_URL")}\"")
+    buildConfigField("String", "GEMINI_PROXY_URL", "\"${readConfig("GEMINI_PROXY_URL", "https://hieudon-gemini-proxy.mr-quynh91.workers.dev")}\"")
     buildConfigField("String", "GEMINI_PROXY_TOKEN", "\"${readConfig("GEMINI_PROXY_TOKEN")}\"")
     buildConfigField("String", "GITHUB_OTA_REPO", "\"${readConfig("GITHUB_OTA_REPO", "mrquynh91-cyber/nhac-thuoc")}\"")
     buildConfigField("String", "GITHUB_OTA_TOKEN", "\"${readConfig("GITHUB_OTA_TOKEN")}\"")
