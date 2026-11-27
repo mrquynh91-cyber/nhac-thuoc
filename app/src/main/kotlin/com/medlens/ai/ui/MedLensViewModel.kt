@@ -41,8 +41,8 @@ import java.io.FileOutputStream
 enum class MainTab(val label: String) {
     HOME("Trang chủ"),
     SCAN("Quét AI"),
-    RECORDS("Sổ khám"),
     AI_CHAT("Gemini AI"),
+    RECORDS("Sổ khám"),
     SETTINGS("Cài đặt")
 }
 
