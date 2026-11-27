@@ -458,7 +458,7 @@ fun ScanScreen(
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(Modifier.width(10.dp))
-                                Text("Gemini 2.5 Flash đang giải mã...")
+                                Text("Gemini ($geminiModel) đang giải mã...")
                             } else {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))

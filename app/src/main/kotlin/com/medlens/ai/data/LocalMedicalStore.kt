@@ -84,10 +84,17 @@ class LocalMedicalStore(private val context: Context) {
         val savedGeminiKey = prefs.getString(KEY_GEMINI_API_KEY, "")?.trim().orEmpty()
         val savedGithubRepo = prefs.getString(KEY_GITHUB_OTA_REPO, "")?.trim().orEmpty()
         val savedGithubToken = prefs.getString(KEY_GITHUB_OTA_TOKEN, "")?.trim().orEmpty()
+        val savedModel = prefs.getString(KEY_GEMINI_MODEL, AppSettings.DEFAULT_GEMINI_MODEL)
+            ?.trim()
+            .orEmpty()
+        val resolvedModel = when {
+            savedModel.isEmpty() -> AppSettings.DEFAULT_GEMINI_MODEL
+            savedModel == "gemini-2.5-flash" || savedModel == "gemini-2.0-flash" -> AppSettings.DEFAULT_GEMINI_MODEL
+            else -> savedModel
+        }
         return AppSettings(
             geminiApiKey = savedGeminiKey.ifEmpty { BuildConfig.GEMINI_API_KEY },
-            geminiModel = prefs.getString(KEY_GEMINI_MODEL, AppSettings.DEFAULT_GEMINI_MODEL)
-                ?: AppSettings.DEFAULT_GEMINI_MODEL,
+            geminiModel = resolvedModel,
             githubOtaRepo = savedGithubRepo.ifEmpty { BuildConfig.GITHUB_OTA_REPO },
             githubOtaToken = savedGithubToken.ifEmpty { BuildConfig.GITHUB_OTA_TOKEN },
             morningTime = prefs.getString(KEY_MORNING_TIME, "07:00") ?: "07:00",

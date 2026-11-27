@@ -212,12 +212,14 @@ data class AppSettings(
     }
 
     companion object {
-        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_GEMINI_MODEL = "gemini-4-hydrogen"
         val SUPPORTED_MODELS = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-flash-latest"
+            "gemini-4-hydrogen",
+            "gemini-4-neon",
+            "gemini-4-argon",
+            "gemini-4-carbon",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite"
         )
     }
 }

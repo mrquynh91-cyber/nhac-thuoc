@@ -438,7 +438,11 @@ fun SyncAndOtaScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
-                Text("Chọn model Gemini (khuyên dùng gemini-2.5-flash)", style = MaterialTheme.typography.labelMedium, color = MutedText)
+                Text(
+                    "Chọn model Gemini 4 / 3.8 (mặc định gemini-4-hydrogen nhanh & chính xác)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MutedText
+                )
                 Spacer(Modifier.height(6.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

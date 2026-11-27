@@ -187,17 +187,19 @@ class GeminiRepository(
         if (firstAttempt.code == 404) {
             val discovered = discoverAvailableGeminiModels(apiKey)
             val fallbackCandidates = (discovered + listOf(
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-                "gemini-flash-latest",
-                "gemini-2.5-pro"
+                "gemini-4-hydrogen",
+                "gemini-4-neon",
+                "gemini-3.8-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-4-argon",
+                "gemini-flash-latest"
             ))
                 .map { normalizeModelId(it) }
                 .distinct()
                 .filter { it.isNotEmpty() && it != primary }
 
             var lastError = firstAttempt
-            for (candidate in fallbackCandidates.take(4)) {
+            for (candidate in fallbackCandidates.take(5)) {
                 val retry = postGenerateContent(candidate, apiKey, requestJson)
                 if (retry.isSuccess) {
                     onModelAutoSwitched?.invoke(candidate)
@@ -278,13 +280,17 @@ class GeminiRepository(
     }
 
     private fun modelRank(id: String): Int = when {
-        id == "gemini-2.5-flash" -> 0
-        id == "gemini-2.5-flash-lite" -> 1
-        id == "gemini-flash-latest" -> 2
-        id.startsWith("gemini-3") && id.contains("flash") -> 3
-        id == "gemini-2.5-pro" -> 4
-        id.contains("flash") -> 5
-        else -> 10
+        id == "gemini-4-hydrogen" -> 0
+        id == "gemini-4-neon" -> 1
+        id == "gemini-3.8-flash" -> 2
+        id == "gemini-3.5-flash-lite" -> 3
+        id == "gemini-4-argon" -> 4
+        id == "gemini-4-carbon" -> 5
+        id.startsWith("gemini-4") -> 6
+        id.startsWith("gemini-3") && id.contains("flash") -> 7
+        id == "gemini-flash-latest" -> 8
+        id.contains("flash") -> 9
+        else -> 12
     }
 
     private fun buildOfflineHelpfulReply(
@@ -341,9 +347,9 @@ class GeminiRepository(
         val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
             ?: throw IllegalArgumentException("Tệp '${attachment.displayName}' không phải hình ảnh hợp lệ.")
 
-        val resized = resizeKeepingAspect(decoded, maxDimension = 1600)
+        val resized = resizeKeepingAspect(decoded, maxDimension = 1280)
         val outStream = ByteArrayOutputStream()
-        resized.compress(Bitmap.CompressFormat.JPEG, 82, outStream)
+        resized.compress(Bitmap.CompressFormat.JPEG, 80, outStream)
         val compressedBytes = outStream.toByteArray()
 
         if (resized !== decoded) resized.recycle()
