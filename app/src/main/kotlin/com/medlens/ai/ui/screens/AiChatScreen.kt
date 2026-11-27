@@ -30,14 +30,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,9 +56,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.runtime.Composable
@@ -81,6 +88,7 @@ import androidx.core.content.ContextCompat
 import com.medlens.ai.data.FamilyProfile
 import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.data.RecordChatMessage
+import com.medlens.ai.data.SavedAiChatSession
 import com.medlens.ai.ui.theme.AlertRed
 import com.medlens.ai.ui.theme.AlertRedBg
 import com.medlens.ai.ui.theme.MutedText
@@ -92,17 +100,24 @@ import com.medlens.ai.ui.theme.WarningAmberBg
 import com.medlens.ai.voice.InAppVoiceRecorder
 import kotlinx.coroutines.delay
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun AiChatScreen(
     activeProfile: FamilyProfile,
     profileRecords: List<MedicalRecord>,
     messages: List<RecordChatMessage>,
+    savedChats: List<SavedAiChatSession>,
     geminiModel: String,
     hasGeminiApiKey: Boolean,
     isReplying: Boolean,
     onSendMessage: (question: String, focusedRecordId: String?) -> Unit,
     onSendVoice: (audioFile: File, focusedRecordId: String?) -> Unit,
+    onSaveChatHistory: (title: String, focusedRecordTitle: String) -> Unit,
+    onLoadSavedChat: (SavedAiChatSession) -> Unit,
+    onDeleteSavedChat: (String) -> Unit,
     onClearChat: () -> Unit,
     onGoToSettings: () -> Unit,
     onShowMessage: (String) -> Unit
@@ -112,6 +127,9 @@ fun AiChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var focusedRecordId by remember(activeProfile.id) { mutableStateOf<String?>(null) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var viewingSavedSession by remember { mutableStateOf<SavedAiChatSession?>(null) }
     val listState = rememberLazyListState()
 
     // Dedicated in-app voice recorder (independent of keyboard voice)
@@ -295,6 +313,22 @@ fun AiChatScreen(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (messages.isNotEmpty()) {
+                        IconButton(onClick = { showSaveDialog = true }) {
+                            Icon(
+                                Icons.Default.BookmarkAdd,
+                                contentDescription = "Lưu lịch sử chat",
+                                tint = TealPrimary
+                            )
+                        }
+                    }
+                    IconButton(onClick = { showHistoryDialog = true }) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = "Xem lịch sử đã lưu",
+                            tint = if (savedChats.isNotEmpty()) TealPrimary else MutedText
+                        )
+                    }
+                    if (messages.isNotEmpty()) {
                         IconButton(onClick = onClearChat) {
                             Icon(
                                 Icons.Default.DeleteSweep,
@@ -373,12 +407,45 @@ fun AiChatScreen(
                                 text = "Hỏi bất kỳ câu hỏi y khoa nào (bệnh lý, phác đồ thuốc, chỉ số xét nghiệm, tương tác thuốc, dinh dưỡng...) bằng cách gõ chữ, chọn câu gợi ý bên dưới hoặc bấm nút Micro ghi âm trực tiếp!",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            if (savedChats.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                FilledTonalButton(
+                                    onClick = { showHistoryDialog = true },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(17.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Xem lịch sử đã lưu (${savedChats.size})")
+                                }
+                            }
                         }
                     }
                 }
             } else {
                 items(messages, key = { it.id }) { msg ->
                     AssistantChatBubble(msg)
+                }
+                item(key = "save_chat_bar") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        OutlinedButton(
+                            onClick = { showSaveDialog = true },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.BookmarkAdd,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Lưu lịch sử cuộc trò chuyện này để xem sau")
+                        }
+                    }
                 }
             }
 
@@ -550,6 +617,179 @@ fun AiChatScreen(
                 }
             }
         }
+    }
+
+    // Save current AI chat session dialog
+    if (showSaveDialog) {
+        val suggestedTitle = remember(messages) {
+            messages.firstOrNull { it.isUser }?.text
+                ?.removePrefix("🎤 ")
+                ?.trim()
+                ?.take(60)
+                ?.ifBlank { "Hỏi đáp AI • ${activeProfile.name}" }
+                ?: "Hỏi đáp AI • ${activeProfile.name}"
+        }
+        var titleInput by remember(showSaveDialog, suggestedTitle) { mutableStateOf(suggestedTitle) }
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false },
+            title = { Text("Lưu lịch sử trò chuyện AI") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Đặt tên ngắn gọn cho cuộc trò chuyện (${messages.size} tin nhắn) để dễ tìm lại sau này:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MutedText
+                    )
+                    OutlinedTextField(
+                        value = titleInput,
+                        onValueChange = { titleInput = it },
+                        label = { Text("Tiêu đề bản lưu") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val currentFocusedTitle = profileRecords
+                            .firstOrNull { it.id == focusedRecordId }
+                            ?.title
+                            .orEmpty()
+                        onSaveChatHistory(titleInput, currentFocusedTitle)
+                        showSaveDialog = false
+                    }
+                ) {
+                    Text("Lưu lại")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveDialog = false }) { Text("Hủy") }
+            }
+        )
+    }
+
+    // Saved AI Chat Archive Dialog
+    if (showHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showHistoryDialog = false },
+            title = { Text("Lịch sử trò chuyện đã lưu (${activeProfile.name})") },
+            text = {
+                if (savedChats.isEmpty()) {
+                    Text(
+                        text = "Chưa có cuộc trò chuyện nào được lưu. Khi trò chuyện với Gemini AI, hãy bấm nút 'Lưu lịch sử' để lưu lại xem sau nhé.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MutedText
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(savedChats, key = { it.id }) { session ->
+                            val dateStr = remember(session.savedAt) {
+                                SimpleDateFormat("HH:mm • dd/MM/yyyy", Locale("vi", "VN")).format(Date(session.savedAt))
+                            }
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHistoryDialog = false
+                                        viewingSavedSession = session
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = session.title,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = "$dateStr • ${session.messages.size} tin nhắn",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MutedText
+                                        )
+                                        if (session.focusedRecordTitle.isNotBlank()) {
+                                            Text(
+                                                text = "Phiếu: ${session.focusedRecordTitle}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = TealPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    IconButton(onClick = { onDeleteSavedChat(session.id) }) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Xóa bản lưu",
+                                            tint = AlertRed,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showHistoryDialog = false }) { Text("Đóng") }
+            }
+        )
+    }
+
+    // View a saved AI chat session in full + option to resume in active chat
+    viewingSavedSession?.let { session ->
+        AlertDialog(
+            onDismissRequest = { viewingSavedSession = null },
+            title = {
+                Column {
+                    Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                    Text(
+                        text = SimpleDateFormat("HH:mm • dd/MM/yyyy", Locale("vi", "VN")).format(Date(session.savedAt)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MutedText
+                    )
+                }
+            },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(360.dp)
+                ) {
+                    items(session.messages, key = { it.id }) { msg ->
+                        AssistantChatBubble(msg)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onLoadSavedChat(session)
+                        viewingSavedSession = null
+                    }
+                ) {
+                    Text("Mở tiếp vào khung chat")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewingSavedSession = null }) { Text("Đóng") }
+            }
+        )
     }
 }
 

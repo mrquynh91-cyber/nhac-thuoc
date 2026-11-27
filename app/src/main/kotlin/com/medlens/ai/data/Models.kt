@@ -204,6 +204,16 @@ data class RecordChatMessage(
 )
 
 @Serializable
+data class SavedAiChatSession(
+    val id: String = UUID.randomUUID().toString(),
+    val profileId: String = FamilyProfile.DEFAULT_SELF_ID,
+    val title: String,
+    val focusedRecordTitle: String = "",
+    val messages: List<RecordChatMessage> = emptyList(),
+    val savedAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class MedicalRecord(
     val id: String = UUID.randomUUID().toString(),
     val profileId: String = FamilyProfile.DEFAULT_SELF_ID,
@@ -357,6 +367,7 @@ data class LocalDatabaseSnapshot(
     val reminders: List<MedicationReminder> = emptyList(),
     val intakeLogs: List<MedicationIntakeLog> = emptyList(),
     val assistantChats: Map<String, List<RecordChatMessage>> = emptyMap(),
+    val savedAiChats: List<SavedAiChatSession> = emptyList(),
     val dietPlans: Map<String, PatientDietPlan> = emptyMap(),
     val deletedProfileIds: Map<String, Long> = emptyMap(),
     val deletedRecordIds: Map<String, Long> = emptyMap(),

@@ -75,6 +75,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
     val activeTodayDoses by vm.activeProfileTodayDoses.collectAsState()
     val activeTrends by vm.activeProfileTrends.collectAsState()
     val activeAssistantChat by vm.activeProfileAssistantChat.collectAsState()
+    val activeSavedChats by vm.activeProfileSavedChats.collectAsState()
     val activeDietPlan by vm.activeProfileDietPlan.collectAsState()
     val isGeneratingDiet by vm.isGeneratingDiet.collectAsState()
     val settings by vm.settings.collectAsState()
@@ -281,11 +282,15 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     activeProfile = activeProfile,
                     profileRecords = activeRecords,
                     messages = activeAssistantChat,
+                    savedChats = activeSavedChats,
                     geminiModel = settings.geminiModel,
                     hasGeminiApiKey = settings.hasAiReady,
                     isReplying = isAssistantReplying,
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
                     onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
+                    onSaveChatHistory = { title, recordTitle -> vm.saveCurrentAssistantChat(title, recordTitle) },
+                    onLoadSavedChat = { session -> vm.loadSavedAssistantChat(session) },
+                    onDeleteSavedChat = { id -> vm.deleteSavedAssistantChat(id) },
                     onClearChat = { vm.clearDirectAssistantChat() },
                     onGoToSettings = { showSettingsScreen = true },
                     onShowMessage = { vm.showMessage(it) }

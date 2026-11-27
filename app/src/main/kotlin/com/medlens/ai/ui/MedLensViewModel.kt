@@ -23,6 +23,7 @@ import com.medlens.ai.data.MedicationReminder
 import com.medlens.ai.data.PatientDietPlan
 import com.medlens.ai.data.RecordChatMessage
 import com.medlens.ai.data.SampleMedicalData
+import com.medlens.ai.data.SavedAiChatSession
 import com.medlens.ai.data.ScanAttachment
 import com.medlens.ai.data.TrendAnalyzer
 import com.medlens.ai.ota.OtaReleaseInfo
@@ -118,6 +119,13 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         activeProfile
     ) { map, prof ->
         map[prof.id].orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeProfileSavedChats: StateFlow<List<SavedAiChatSession>> = combine(
+        localStore.savedAiChats,
+        activeProfile
+    ) { all, prof ->
+        all.filter { it.profileId == prof.id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeProfileDietPlan: StateFlow<PatientDietPlan?> = combine(
@@ -434,6 +442,42 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         val profile = activeProfile.value
         localStore.clearAssistantChat(profile.id)
         _snackbarMessage.value = "Đã bắt đầu cuộc trò chuyện mới cho ${profile.name}."
+    }
+
+    fun saveCurrentAssistantChat(customTitle: String, focusedRecordTitle: String = "") {
+        val profile = activeProfile.value
+        val currentMessages = activeProfileAssistantChat.value
+        if (currentMessages.isEmpty()) {
+            _snackbarMessage.value = "Chưa có tin nhắn nào để lưu."
+            return
+        }
+        val fallbackTitle = currentMessages.firstOrNull { it.isUser }?.text
+            ?.removePrefix("🎤 ")
+            ?.trim()
+            ?.take(60)
+            ?.ifBlank { "Hỏi đáp AI • ${profile.name}" }
+            ?: "Hỏi đáp AI • ${profile.name}"
+        val resolvedTitle = customTitle.trim().ifBlank { fallbackTitle }
+        val session = SavedAiChatSession(
+            profileId = profile.id,
+            title = resolvedTitle,
+            focusedRecordTitle = focusedRecordTitle.trim(),
+            messages = currentMessages,
+            savedAt = System.currentTimeMillis()
+        )
+        localStore.saveAiChatSession(session)
+        _snackbarMessage.value = "✅ Đã lưu lịch sử trò chuyện: \"$resolvedTitle\"!"
+    }
+
+    fun loadSavedAssistantChat(session: SavedAiChatSession) {
+        val profile = activeProfile.value
+        localStore.replaceAssistantChat(profile.id, session.messages)
+        _snackbarMessage.value = "Đã mở lại cuộc trò chuyện \"${session.title}\"."
+    }
+
+    fun deleteSavedAssistantChat(sessionId: String) {
+        localStore.deleteSavedAiChatSession(sessionId)
+        _snackbarMessage.value = "Đã xóa bản lưu cuộc trò chuyện."
     }
 
     fun generatePersonalizedDietPlan(

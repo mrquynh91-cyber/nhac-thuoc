@@ -42,6 +42,9 @@ class LocalMedicalStore(private val context: Context) {
     private val _assistantChats = MutableStateFlow<Map<String, List<RecordChatMessage>>>(emptyMap())
     val assistantChats: StateFlow<Map<String, List<RecordChatMessage>>> = _assistantChats.asStateFlow()
 
+    private val _savedAiChats = MutableStateFlow<List<SavedAiChatSession>>(emptyList())
+    val savedAiChats: StateFlow<List<SavedAiChatSession>> = _savedAiChats.asStateFlow()
+
     private val _dietPlans = MutableStateFlow<Map<String, PatientDietPlan>>(emptyMap())
     val dietPlans: StateFlow<Map<String, PatientDietPlan>> = _dietPlans.asStateFlow()
 
@@ -80,6 +83,7 @@ class LocalMedicalStore(private val context: Context) {
                 _reminders.value = dedupedReminders
                 _intakeLogs.value = snapshot.intakeLogs.sortedByDescending { it.loggedAt }
                 _assistantChats.value = snapshot.assistantChats
+                _savedAiChats.value = snapshot.savedAiChats.sortedByDescending { it.savedAt }
                 _dietPlans.value = snapshot.dietPlans
                 if (droppedIds.isNotEmpty()) {
                     persistToDisk()
@@ -96,6 +100,7 @@ class LocalMedicalStore(private val context: Context) {
                 reminders = _reminders.value,
                 intakeLogs = _intakeLogs.value,
                 assistantChats = _assistantChats.value,
+                savedAiChats = _savedAiChats.value,
                 dietPlans = _dietPlans.value,
                 deletedProfileIds = deletedProfileIds.toMap(),
                 deletedRecordIds = deletedRecordIds.toMap(),
@@ -246,6 +251,31 @@ class LocalMedicalStore(private val context: Context) {
             val currentMap = _assistantChats.value.toMutableMap()
             currentMap.remove(profileId)
             _assistantChats.value = currentMap
+            persistToDisk()
+        }
+    }
+
+    fun replaceAssistantChat(profileId: String, messages: List<RecordChatMessage>) {
+        synchronized(lock) {
+            val currentMap = _assistantChats.value.toMutableMap()
+            currentMap[profileId] = messages.takeLast(60)
+            _assistantChats.value = currentMap
+            persistToDisk()
+        }
+    }
+
+    fun saveAiChatSession(session: SavedAiChatSession) {
+        synchronized(lock) {
+            val updated = (_savedAiChats.value.filterNot { it.id == session.id } + session)
+                .sortedByDescending { it.savedAt }
+            _savedAiChats.value = updated
+            persistToDisk()
+        }
+    }
+
+    fun deleteSavedAiChatSession(sessionId: String) {
+        synchronized(lock) {
+            _savedAiChats.value = _savedAiChats.value.filterNot { it.id == sessionId }
             persistToDisk()
         }
     }
