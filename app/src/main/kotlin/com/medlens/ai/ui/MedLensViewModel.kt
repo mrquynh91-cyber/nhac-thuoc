@@ -500,6 +500,31 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         _snackbarMessage.value = "Đã bắt đầu cuộc trò chuyện mới cho ${profile.name}."
     }
 
+    fun transcribeAudioIntoInput(audioFile: File, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val cfg = settings.value
+            val result = geminiRepo.transcribeAudioToText(
+                audioFile = audioFile,
+                endpoint = currentGeminiEndpoint(),
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            result.onSuccess { text ->
+                if (text.isNotBlank()) {
+                    onResult(text)
+                } else {
+                    onResult("")
+                    _snackbarMessage.value = "Chưa nghe rõ lời nói, bạn hãy thử nói lại nhé."
+                }
+            }.onFailure { err ->
+                onResult("")
+                _snackbarMessage.value = "Không thể chuyển giọng nói thành chữ: ${err.localizedMessage}"
+            }
+        }
+    }
+
     fun saveCurrentAssistantChat(customTitle: String, focusedRecordTitle: String = "") {
         val profile = activeProfile.value
         val currentMessages = activeProfileAssistantChat.value

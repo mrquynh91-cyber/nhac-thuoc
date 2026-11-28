@@ -107,6 +107,7 @@ import com.medlens.ai.ui.theme.TealLightContainer
 import com.medlens.ai.ui.theme.TealPrimary
 import com.medlens.ai.ui.theme.WarningAmber
 import com.medlens.ai.ui.theme.WarningAmberBg
+import com.medlens.ai.voice.InAppSpeechDictator
 import com.medlens.ai.voice.InAppVoiceRecorder
 import kotlinx.coroutines.delay
 import java.io.File
@@ -125,7 +126,7 @@ fun AiChatScreen(
     isReplying: Boolean,
     onSendMessage: (question: String, focusedRecordId: String?) -> Unit,
     onSendImage: (imageUri: Uri, question: String, focusedRecordId: String?) -> Unit,
-    onSendVoice: (audioFile: File, focusedRecordId: String?) -> Unit,
+    onTranscribeVoiceToText: (audioFile: File, onResult: (String) -> Unit) -> Unit,
     onSaveChatHistory: (title: String, focusedRecordTitle: String) -> Unit,
     onLoadSavedChat: (SavedAiChatSession) -> Unit,
     onDeleteSavedChat: (String) -> Unit,
@@ -185,49 +186,83 @@ fun AiChatScreen(
         }
     }
 
-    // Dedicated in-app voice recorder (independent of keyboard voice)
-    val voiceRecorder = remember(context) { InAppVoiceRecorder(context) }
-    var isRecording by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableIntStateOf(0) }
+    // Live headless in-app Vietnamese speech-to-text into the chat box (NO full-screen Google popup, NEVER auto-sends)
+    val speechDictator = remember(context) { InAppSpeechDictator(context) }
+    val fallbackRecorder = remember(context) { InAppVoiceRecorder(context) }
+    var isDictating by remember { mutableStateOf(false) }
+    var isFallbackRecording by remember { mutableStateOf(false) }
+    var isTranscribingFallback by remember { mutableStateOf(false) }
+    var fallbackSeconds by remember { mutableIntStateOf(0) }
 
     DisposableEffect(Unit) {
-        onDispose { voiceRecorder.stopAndDiscard() }
+        onDispose {
+            speechDictator.stopAndRelease()
+            fallbackRecorder.stopAndDiscard()
+        }
     }
 
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            recordingSeconds = 0
-            while (isRecording) {
+    fun appendSpokenIntoInput(spoken: String) {
+        val clean = spoken.trim()
+        if (clean.isNotEmpty()) {
+            inputText = if (inputText.isBlank()) clean else "${inputText.trimEnd()} $clean"
+        }
+    }
+
+    fun finishFallbackRecordingIntoInput() {
+        isFallbackRecording = false
+        val file = fallbackRecorder.stopAndGetFile()
+        if (file != null) {
+            isTranscribingFallback = true
+            onTranscribeVoiceToText(file) { transcript ->
+                isTranscribingFallback = false
+                appendSpokenIntoInput(transcript)
+            }
+        } else {
+            onShowMessage("Chưa nghe rõ giọng nói, hãy bấm Micro và nói rõ hơn nhé.")
+        }
+    }
+
+    LaunchedEffect(isFallbackRecording) {
+        if (isFallbackRecording) {
+            fallbackSeconds = 0
+            while (isFallbackRecording) {
                 delay(1000L)
-                recordingSeconds++
-                if (recordingSeconds >= 60) {
-                    isRecording = false
-                    val file = voiceRecorder.stopAndGetFile()
-                    if (file != null) onSendVoice(file, focusedRecordId)
+                fallbackSeconds++
+                if (fallbackSeconds >= 60) {
+                    finishFallbackRecordingIntoInput()
                 }
             }
         }
     }
 
-    fun startInAppRecording() {
-        keyboardController?.hide()
-        voiceRecorder.startRecording()
+    fun startFallbackRecording() {
+        fallbackRecorder.startRecording()
             .onSuccess {
-                isRecording = true
+                isFallbackRecording = true
             }
             .onFailure { err ->
-                isRecording = false
-                onShowMessage("Không thể mở micro ghi âm: ${err.localizedMessage}")
+                isFallbackRecording = false
+                onShowMessage("Không thể mở micro: ${err.localizedMessage}")
             }
+    }
+
+    fun startLiveDictation() {
+        speechDictator.startListening(
+            baseText = inputText,
+            onTextChanged = { updated -> inputText = updated },
+            onListeningChanged = { active -> isDictating = active },
+            onInfoMessage = { msg -> onShowMessage(msg) },
+            onFallbackNeeded = { startFallbackRecording() }
+        )
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startInAppRecording()
+            startLiveDictation()
         } else {
-            onShowMessage("Cần cấp quyền Micro để ghi âm hỏi đáp trực tiếp trong app.")
+            onShowMessage("Cần cấp quyền Micro để nhập giọng nói vào ô chat.")
         }
     }
 
@@ -534,7 +569,8 @@ fun AiChatScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
                 // Suggestions pinned right above typing area — visible even when keyboard opens!
-                AnimatedVisibility(visible = !isRecording) {
+                val isListeningAny = isDictating || isFallbackRecording
+                AnimatedVisibility(visible = !isListeningAny) {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -559,176 +595,193 @@ fun AiChatScreen(
                     }
                 }
 
-                if (isRecording) {
-                    // Dedicated In-App Voice Recording Bar (does NOT use keyboard voice)
+                // Compact live listening status pill — NEVER hides the chat box or attached image!
+                AnimatedVisibility(visible = isListeningAny || isTranscribingFallback) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(AlertRedBg.copy(alpha = 0.75f))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .background(AlertRedBg.copy(alpha = 0.72f))
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(AlertRed),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.GraphicEq,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
+                        if (isTranscribingFallback) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = AlertRed
                             )
+                            Text(
+                                text = "Đang chuyển lời nói thành chữ vào ô chat...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF7F1D1D),
+                                modifier = Modifier.weight(1f)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(AlertRed),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.GraphicEq,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            Text(
+                                text = if (isDictating) {
+                                    "Đang nghe trực tiếp vào ô chat... Bấm dừng khi nói xong"
+                                } else {
+                                    "Đang nghe (00:%02d)... Bấm dừng để điền chữ vào ô chat".format(fallbackSeconds)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF7F1D1D),
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = {
+                                    if (isDictating) {
+                                        speechDictator.stopListening { isDictating = it }
+                                    } else if (isFallbackRecording) {
+                                        finishFallbackRecordingIntoInput()
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Dừng", color = AlertRed, fontWeight = FontWeight.Bold)
+                            }
                         }
+                    }
+                }
+
+                // Selected image preview strip right above the typing box (stays visible while speaking!)
+                pendingImageUri?.let { uri ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TealLightContainer.copy(alpha = 0.55f))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "Ảnh đính kèm",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Đang ghi âm giọng nói...",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = AlertRed,
-                                fontWeight = FontWeight.Bold
+                                text = "Đã đính kèm hình ảnh",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TealDark
                             )
                             Text(
-                                text = "00:%02d • Bấm Gửi khi nói xong".format(recordingSeconds),
+                                text = "Gõ chữ hoặc bấm Micro để nói câu hỏi rồi bấm Gửi",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF7F1D1D)
+                                color = MutedText
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                isRecording = false
-                                voiceRecorder.stopAndDiscard()
-                            }
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Hủy ghi âm", tint = AlertRed)
+                        IconButton(onClick = { pendingImageUri = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Bỏ ảnh", tint = AlertRed)
                         }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 10.dp, bottom = 8.dp, top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box {
+                        FilledTonalIconButton(
+                            onClick = { showImageSourceMenu = true },
+                            enabled = !isReplying
+                        ) {
+                            Icon(
+                                Icons.Default.AddPhotoAlternate,
+                                contentDescription = "Gửi hình ảnh",
+                                tint = TealPrimary
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showImageSourceMenu,
+                            onDismissRequest = { showImageSourceMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Chụp ảnh ngay") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = TealPrimary)
+                                },
+                                onClick = {
+                                    showImageSourceMenu = false
+                                    val granted = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.CAMERA
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (granted) {
+                                        launchChatCamera()
+                                    } else {
+                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Chọn ảnh từ thư viện") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = TealPrimary)
+                                },
+                                onClick = {
+                                    showImageSourceMenu = false
+                                    galleryPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = {
+                            Text(
+                                if (pendingImageUri != null) "Hỏi gì về ảnh này..."
+                                else "Hỏi y khoa, thuốc hoặc gửi ảnh..."
+                            )
+                        },
+                        maxLines = 3,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (isListeningAny) {
                         FilledIconButton(
                             onClick = {
-                                isRecording = false
-                                val audioFile = voiceRecorder.stopAndGetFile()
-                                if (audioFile != null) {
-                                    onSendVoice(audioFile, focusedRecordId)
-                                } else {
-                                    onShowMessage("Đoạn ghi âm quá ngắn, hãy giữ và nói rõ hơn nhé.")
+                                if (isDictating) {
+                                    speechDictator.stopListening { isDictating = it }
+                                } else if (isFallbackRecording) {
+                                    finishFallbackRecordingIntoInput()
                                 }
                             },
                             colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = TealPrimary,
+                                containerColor = AlertRed,
                                 contentColor = Color.White
                             )
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = "Dừng và gửi giọng nói")
+                            Icon(Icons.Default.Stop, contentDescription = "Dừng nói")
                         }
-                    }
-                } else {
-                    // Selected image preview strip right above the typing box
-                    pendingImageUri?.let { uri ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(TealLightContainer.copy(alpha = 0.55f))
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = uri,
-                                contentDescription = "Ảnh đính kèm",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Đã đính kèm hình ảnh",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TealDark
-                                )
-                                Text(
-                                    text = "Nhập thêm câu hỏi hoặc bấm Gửi ngay để AI xem ảnh",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MutedText
-                                )
-                            }
-                            IconButton(onClick = { pendingImageUri = null }) {
-                                Icon(Icons.Default.Close, contentDescription = "Bỏ ảnh", tint = AlertRed)
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 10.dp, end = 10.dp, bottom = 8.dp, top = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Box {
-                            FilledTonalIconButton(
-                                onClick = { showImageSourceMenu = true },
-                                enabled = !isReplying
-                            ) {
-                                Icon(
-                                    Icons.Default.AddPhotoAlternate,
-                                    contentDescription = "Gửi hình ảnh",
-                                    tint = TealPrimary
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = showImageSourceMenu,
-                                onDismissRequest = { showImageSourceMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Chụp ảnh ngay") },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = TealPrimary)
-                                    },
-                                    onClick = {
-                                        showImageSourceMenu = false
-                                        val granted = ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.CAMERA
-                                        ) == PackageManager.PERMISSION_GRANTED
-                                        if (granted) {
-                                            launchChatCamera()
-                                        } else {
-                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                        }
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Chọn ảnh từ thư viện") },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = TealPrimary)
-                                    },
-                                    onClick = {
-                                        showImageSourceMenu = false
-                                        galleryPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    }
-                                )
-                            }
-                        }
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = {
-                                Text(
-                                    if (pendingImageUri != null) "Hỏi gì về ảnh này..."
-                                    else "Hỏi y khoa, thuốc hoặc gửi ảnh..."
-                                )
-                            },
-                            maxLines = 3,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.weight(1f)
-                        )
+                    } else {
                         FilledTonalIconButton(
                             onClick = {
                                 val granted = ContextCompat.checkSelfPermission(
@@ -736,33 +789,34 @@ fun AiChatScreen(
                                     Manifest.permission.RECORD_AUDIO
                                 ) == PackageManager.PERMISSION_GRANTED
                                 if (granted) {
-                                    startInAppRecording()
+                                    startLiveDictation()
                                 } else {
                                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            enabled = !isReplying
+                            enabled = !isReplying && !isTranscribingFallback
                         ) {
-                            Icon(Icons.Default.Mic, contentDescription = "Ghi âm trực tiếp", tint = TealPrimary)
+                            Icon(Icons.Default.Mic, contentDescription = "Nói trực tiếp vào ô chat", tint = TealPrimary)
                         }
-                        FilledTonalIconButton(
-                            onClick = {
-                                val attachedUri = pendingImageUri
-                                if (attachedUri != null) {
-                                    keyboardController?.hide()
-                                    onSendImage(attachedUri, inputText, focusedRecordId)
-                                    pendingImageUri = null
-                                    inputText = ""
-                                } else if (inputText.isNotBlank()) {
-                                    keyboardController?.hide()
-                                    onSendMessage(inputText, focusedRecordId)
-                                    inputText = ""
-                                }
-                            },
-                            enabled = (inputText.isNotBlank() || pendingImageUri != null) && !isReplying
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi", tint = TealPrimary)
-                        }
+                    }
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (isDictating) speechDictator.stopListening { isDictating = it }
+                            val attachedUri = pendingImageUri
+                            if (attachedUri != null) {
+                                keyboardController?.hide()
+                                onSendImage(attachedUri, inputText, focusedRecordId)
+                                pendingImageUri = null
+                                inputText = ""
+                            } else if (inputText.isNotBlank()) {
+                                keyboardController?.hide()
+                                onSendMessage(inputText, focusedRecordId)
+                                inputText = ""
+                            }
+                        },
+                        enabled = (inputText.isNotBlank() || pendingImageUri != null) && !isReplying && !isTranscribingFallback
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi", tint = TealPrimary)
                     }
                 }
             }

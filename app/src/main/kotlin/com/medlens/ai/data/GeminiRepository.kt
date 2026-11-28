@@ -644,6 +644,53 @@ class GeminiRepository(
         }
     }
 
+    suspend fun transcribeAudioToText(
+        audioFile: File,
+        endpoint: GeminiEndpointConfig,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (!endpoint.isReady) {
+            audioFile.delete()
+            return@withContext Result.failure(
+                IllegalStateException("Chưa cấu hình máy chủ AI để chuyển giọng nói thành chữ.")
+            )
+        }
+        runCatching {
+            val audioB64 = Base64.encodeToString(audioFile.readBytes(), Base64.NO_WRAP)
+            val root = buildJsonObject {
+                put("contents", buildJsonArray {
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("text", "Hãy chép lại CHÍNH XÁC nội dung lời nói tiếng Việt trong đoạn âm thanh sau thành văn bản thuần túy, không thêm lời giải thích.")
+                            })
+                            add(buildJsonObject {
+                                put("inline_data", buildJsonObject {
+                                    put("mime_type", "audio/mp4")
+                                    put("data", audioB64)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.1)
+                })
+            }
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                endpoint = endpoint,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            extractCandidateText(responseBody).trim()
+        }.also {
+            audioFile.delete()
+        }
+    }
+
     suspend fun generatePersonalizedDietPlan(
         profile: FamilyProfile,
         conditionKey: String,

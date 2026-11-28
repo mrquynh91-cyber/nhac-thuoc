@@ -177,8 +177,8 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
             onSendChatQuestion = { q ->
                 vm.askRecordFollowUp(record, q)
             },
-            onSendChatVoice = { file ->
-                vm.askRecordFollowUpVoice(record, file)
+            onTranscribeVoiceToText = { file, cb ->
+                vm.transcribeAudioIntoInput(file, cb)
             },
             onShowMessage = { vm.showMessage(it) }
         )
@@ -288,7 +288,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     isReplying = isAssistantReplying,
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
                     onSendImage = { uri, q, recId -> vm.sendDirectAssistantImage(uri, q, recId) },
-                    onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
+                    onTranscribeVoiceToText = { file, cb -> vm.transcribeAudioIntoInput(file, cb) },
                     onSaveChatHistory = { title, recordTitle -> vm.saveCurrentAssistantChat(title, recordTitle) },
                     onLoadSavedChat = { session -> vm.loadSavedAssistantChat(session) },
                     onDeleteSavedChat = { id -> vm.deleteSavedAssistantChat(id) },
