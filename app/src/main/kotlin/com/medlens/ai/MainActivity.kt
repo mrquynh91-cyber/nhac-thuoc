@@ -287,6 +287,7 @@ fun MedLensApp(vm: MedLensViewModel = viewModel()) {
                     hasGeminiApiKey = settings.hasAiReady,
                     isReplying = isAssistantReplying,
                     onSendMessage = { q, recId -> vm.sendDirectAssistantMessage(q, recId) },
+                    onSendImage = { uri, q, recId -> vm.sendDirectAssistantImage(uri, q, recId) },
                     onSendVoice = { file, recId -> vm.sendDirectAssistantVoice(file, recId) },
                     onSaveChatHistory = { title, recordTitle -> vm.saveCurrentAssistantChat(title, recordTitle) },
                     onLoadSavedChat = { session -> vm.loadSavedAssistantChat(session) },

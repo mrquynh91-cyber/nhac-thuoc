@@ -200,6 +200,7 @@ data class RecordChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val isUser: Boolean,
     val text: String,
+    val imagePath: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 

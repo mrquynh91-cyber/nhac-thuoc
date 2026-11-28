@@ -2,11 +2,14 @@ package com.medlens.ai.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,15 +32,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WarningAmber
@@ -75,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -85,6 +93,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.medlens.ai.data.FamilyProfile
 import com.medlens.ai.data.MedicalRecord
 import com.medlens.ai.data.RecordChatMessage
@@ -114,6 +124,7 @@ fun AiChatScreen(
     hasGeminiApiKey: Boolean,
     isReplying: Boolean,
     onSendMessage: (question: String, focusedRecordId: String?) -> Unit,
+    onSendImage: (imageUri: Uri, question: String, focusedRecordId: String?) -> Unit,
     onSendVoice: (audioFile: File, focusedRecordId: String?) -> Unit,
     onSaveChatHistory: (title: String, focusedRecordTitle: String) -> Unit,
     onLoadSavedChat: (SavedAiChatSession) -> Unit,
@@ -127,10 +138,52 @@ fun AiChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var focusedRecordId by remember(activeProfile.id) { mutableStateOf<String?>(null) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var showImageSourceMenu by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var viewingSavedSession by remember { mutableStateOf<SavedAiChatSession?>(null) }
     val listState = rememberLazyListState()
+
+    val galleryPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            pendingImageUri = uri
+        }
+    }
+
+    val takePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCameraUri
+        if (success && uri != null) {
+            pendingImageUri = uri
+        }
+    }
+
+    fun launchChatCamera() {
+        val capturesDir = File(context.cacheDir, "chat_captures").apply { mkdirs() }
+        val photoFile = File(capturesDir, "chat_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            photoFile
+        )
+        pendingCameraUri = uri
+        takePhotoLauncher.launch(uri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchChatCamera()
+        } else {
+            onShowMessage("Cần cấp quyền Camera để chụp ảnh gửi hỏi Gemini AI.")
+        }
+    }
 
     // Dedicated in-app voice recorder (independent of keyboard voice)
     val voiceRecorder = remember(context) { InAppVoiceRecorder(context) }
@@ -404,7 +457,7 @@ fun AiChatScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                text = "Hỏi bất kỳ câu hỏi y khoa nào (bệnh lý, phác đồ thuốc, chỉ số xét nghiệm, tương tác thuốc, dinh dưỡng...) bằng cách gõ chữ, chọn câu gợi ý bên dưới hoặc bấm nút Micro ghi âm trực tiếp!",
+                                text = "Hỏi bất kỳ câu hỏi y khoa nào (bệnh lý, phác đồ thuốc, chỉ số xét nghiệm, tương tác thuốc, dinh dưỡng...) bằng cách gõ chữ, gửi hình ảnh chụp thuốc/món ăn, hoặc bấm Micro ghi âm trực tiếp!",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             if (savedChats.isNotEmpty()) {
@@ -570,17 +623,108 @@ fun AiChatScreen(
                         }
                     }
                 } else {
+                    // Selected image preview strip right above the typing box
+                    pendingImageUri?.let { uri ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(TealLightContainer.copy(alpha = 0.55f))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = "Ảnh đính kèm",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Đã đính kèm hình ảnh",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealDark
+                                )
+                                Text(
+                                    text = "Nhập thêm câu hỏi hoặc bấm Gửi ngay để AI xem ảnh",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MutedText
+                                )
+                            }
+                            IconButton(onClick = { pendingImageUri = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "Bỏ ảnh", tint = AlertRed)
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 2.dp),
+                            .padding(start = 10.dp, end = 10.dp, bottom = 8.dp, top = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
+                        Box {
+                            FilledTonalIconButton(
+                                onClick = { showImageSourceMenu = true },
+                                enabled = !isReplying
+                            ) {
+                                Icon(
+                                    Icons.Default.AddPhotoAlternate,
+                                    contentDescription = "Gửi hình ảnh",
+                                    tint = TealPrimary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showImageSourceMenu,
+                                onDismissRequest = { showImageSourceMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Chụp ảnh ngay") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = TealPrimary)
+                                    },
+                                    onClick = {
+                                        showImageSourceMenu = false
+                                        val granted = ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.CAMERA
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                        if (granted) {
+                                            launchChatCamera()
+                                        } else {
+                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Chọn ảnh từ thư viện") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = TealPrimary)
+                                    },
+                                    onClick = {
+                                        showImageSourceMenu = false
+                                        galleryPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    }
+                                )
+                            }
+                        }
                         OutlinedTextField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            placeholder = { Text("Hỏi kỹ hơn về y khoa, thuốc...") },
+                            placeholder = {
+                                Text(
+                                    if (pendingImageUri != null) "Hỏi gì về ảnh này..."
+                                    else "Hỏi y khoa, thuốc hoặc gửi ảnh..."
+                                )
+                            },
                             maxLines = 3,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.weight(1f)
@@ -603,13 +747,19 @@ fun AiChatScreen(
                         }
                         FilledTonalIconButton(
                             onClick = {
-                                if (inputText.isNotBlank()) {
+                                val attachedUri = pendingImageUri
+                                if (attachedUri != null) {
+                                    keyboardController?.hide()
+                                    onSendImage(attachedUri, inputText, focusedRecordId)
+                                    pendingImageUri = null
+                                    inputText = ""
+                                } else if (inputText.isNotBlank()) {
                                     keyboardController?.hide()
                                     onSendMessage(inputText, focusedRecordId)
                                     inputText = ""
                                 }
                             },
-                            enabled = inputText.isNotBlank() && !isReplying
+                            enabled = (inputText.isNotBlank() || pendingImageUri != null) && !isReplying
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi", tint = TealPrimary)
                         }
@@ -823,6 +973,19 @@ private fun AssistantChatBubble(message: RecordChatMessage) {
                         color = TealPrimary
                     )
                     Spacer(Modifier.height(3.dp))
+                }
+                val imgFile = message.imagePath?.let { File(it) }?.takeIf { it.exists() }
+                if (imgFile != null) {
+                    AsyncImage(
+                        model = imgFile,
+                        contentDescription = "Ảnh đã gửi",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
                 Text(
                     text = if (message.isUser) AnnotatedString(message.text) else formatMedicalMarkdown(message.text),

@@ -402,6 +402,128 @@ class GeminiRepository(
         }
     }
 
+    suspend fun saveChatImageCopy(imageUri: Uri): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            val rawBytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
+                ?: throw IllegalArgumentException("Không thể đọc hình ảnh đã chọn.")
+            val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                ?: throw IllegalArgumentException("Tệp đã chọn không phải hình ảnh hợp lệ.")
+            val resized = resizeKeepingAspect(decoded, maxDimension = 1280)
+            val outStream = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 82, outStream)
+            val compressedBytes = outStream.toByteArray()
+            if (resized !== decoded) resized.recycle()
+            decoded.recycle()
+
+            val chatImgDir = File(context.filesDir, "chat_images").apply { mkdirs() }
+            val savedFile = File(chatImgDir, "chat_${UUID.randomUUID()}.jpg")
+            FileOutputStream(savedFile).use { it.write(compressedBytes) }
+            savedFile
+        }
+    }
+
+    suspend fun askDirectAssistantWithSavedImage(
+        imageFile: File,
+        question: String,
+        profile: FamilyProfile,
+        recentRecords: List<MedicalRecord>,
+        activeReminders: List<MedicationReminder>,
+        focusedRecord: MedicalRecord?,
+        chatHistory: List<RecordChatMessage>,
+        endpoint: GeminiEndpointConfig,
+        modelName: String = AppSettings.DEFAULT_GEMINI_MODEL,
+        onModelAutoSwitched: ((String) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (!endpoint.isReady) {
+            return@withContext Result.failure(
+                IllegalStateException("Chưa cấu hình máy chủ AI hoặc Gemini API Key trong Cài đặt.")
+            )
+        }
+
+        runCatching {
+            val imageBytes = imageFile.readBytes()
+            val imageB64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            val cleanQuestion = question.trim().ifBlank {
+                "Hãy quan sát kỹ hình ảnh này (thuốc, phiếu khám, chỉ số máy đo, món ăn hoặc dấu hiệu sức khỏe...) và giải thích rõ ràng, dễ hiểu cho mình nhé."
+            }
+
+            val profileSummary = "Hồ sơ người đang hỏi: ${profile.aiContextSummary()}"
+            val remindersText = if (activeReminders.isEmpty()) {
+                "Chưa có lịch thuốc đang uống."
+            } else {
+                activeReminders.joinToString("\n") { r ->
+                    "- ${r.medicationName} (${r.dosage}, ${r.mealTiming.labelVi})"
+                }
+            }
+            val contextData = if (focusedRecord != null) {
+                "Phiếu khám đang ghim:\n" + json.encodeToString(
+                    focusedRecord.copy(chatHistory = emptyList(), localImagePath = null, localAttachmentPaths = emptyList())
+                )
+            } else {
+                recentRecords.take(3).joinToString("\n") { rec ->
+                    "- [${rec.recordDate}] ${rec.title}: ${rec.overallSummary.take(160)}"
+                }.ifBlank { "Chưa có phiếu khám." }
+            }
+
+            val systemText = """
+                Bạn là Trợ lý Chuyên môn Y khoa & Dược lý tiếng Việt trong ứng dụng "Hiểu Đơn" (MedRead VN).
+                Người dùng vừa gửi kèm một HÌNH ẢNH để hỏi đáp trực tiếp (có thể là vỏ hộp/lọ thuốc, vỉ thuốc, phiếu xét nghiệm, màn hình máy đo huyết áp/đường huyết, thực phẩm ăn uống, hoặc tổn thương ngoài da...).
+                Nguyên tắc trả lời bắt buộc:
+                1. Quan sát thật kỹ mọi chữ viết, hàm lượng, hoạt chất, số đo hoặc dấu hiệu trong ảnh; giải thích trực diện, rõ ràng, dễ hiểu bằng gạch đầu dòng tiếng Việt đời thường.
+                2. Nếu ảnh mờ không đọc chắc chắn tên thuốc/con số, nói rõ phần nào bị mờ và nhắc xác nhận lại với bác sĩ/dược sĩ — tuyệt đối không bịa số liệu.
+                3. Đối chiếu với hồ sơ thể trạng, bệnh nền, dị ứng và danh sách thuốc đang uống bên dưới (cảnh báo ngay nếu thấy trùng hoạt chất, tương tác thuốc hoặc thực phẩm cần kiêng).
+                4. Đảm bảo an toàn y khoa: nêu rõ thông tin mang tính tham khảo, không thay thế chẩn đoán trực tiếp của bác sĩ và nhắc dấu hiệu cần đi khám ngay nếu có.
+
+                $profileSummary
+                Thuốc đang đặt lịch nhắc:
+                $remindersText
+
+                $contextData
+            """.trimIndent()
+
+            val root = buildJsonObject {
+                put("system_instruction", buildJsonObject {
+                    put("parts", buildJsonArray {
+                        add(buildJsonObject { put("text", systemText) })
+                    })
+                })
+                put("contents", buildJsonArray {
+                    chatHistory.takeLast(10).forEach { msg ->
+                        add(buildJsonObject {
+                            put("role", if (msg.isUser) "user" else "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject { put("text", msg.text) })
+                            })
+                        })
+                    }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject { put("text", cleanQuestion) })
+                            add(buildJsonObject {
+                                put("inline_data", buildJsonObject {
+                                    put("mime_type", "image/jpeg")
+                                    put("data", imageB64)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.3)
+                })
+            }
+
+            val responseBody = executeGenerateContentWithAutoFallback(
+                preferredModel = modelName,
+                endpoint = endpoint,
+                requestJson = root.toString(),
+                onModelAutoSwitched = onModelAutoSwitched
+            )
+            extractCandidateText(responseBody)
+        }
+    }
+
     suspend fun askDirectAssistantVoice(
         audioFile: File,
         profile: FamilyProfile,

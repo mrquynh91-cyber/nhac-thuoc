@@ -394,6 +394,62 @@ class MedLensViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun sendDirectAssistantImage(imageUri: Uri, question: String, focusedRecordId: String?) {
+        if (_isAssistantReplying.value) return
+        val profile = activeProfile.value
+        val previousHistory = activeProfileAssistantChat.value
+        val focusedRecord = focusedRecordId?.let { id -> activeProfileRecords.value.firstOrNull { it.id == id } }
+        val cleanQuestion = question.trim()
+        val displayQuestion = cleanQuestion.ifBlank { "📷 Xem và giải thích giúp mình hình ảnh này" }
+
+        viewModelScope.launch {
+            _isAssistantReplying.value = true
+            val savedFileResult = geminiRepo.saveChatImageCopy(imageUri)
+            val savedFile = savedFileResult.getOrElse { err ->
+                _isAssistantReplying.value = false
+                _snackbarMessage.value = err.localizedMessage ?: "Không thể đọc hình ảnh đã chọn."
+                return@launch
+            }
+
+            localStore.appendAssistantMessages(
+                profile.id,
+                RecordChatMessage(
+                    isUser = true,
+                    text = displayQuestion,
+                    imagePath = savedFile.absolutePath
+                )
+            )
+
+            val cfg = settings.value
+            val result = geminiRepo.askDirectAssistantWithSavedImage(
+                imageFile = savedFile,
+                question = cleanQuestion,
+                profile = profile,
+                recentRecords = activeProfileRecords.value,
+                activeReminders = activeProfileReminders.value.filter { it.isActive },
+                focusedRecord = focusedRecord,
+                chatHistory = previousHistory,
+                endpoint = currentGeminiEndpoint(),
+                modelName = cfg.geminiModel,
+                onModelAutoSwitched = { workingModel ->
+                    localStore.updateSettings { it.copy(geminiModel = workingModel) }
+                }
+            )
+            _isAssistantReplying.value = false
+            result.onSuccess { reply ->
+                localStore.appendAssistantMessages(profile.id, RecordChatMessage(isUser = false, text = reply))
+            }.onFailure { err ->
+                localStore.appendAssistantMessages(
+                    profile.id,
+                    RecordChatMessage(
+                        isUser = false,
+                        text = "Xin lỗi, mình chưa thể phân tích hình ảnh lúc này: ${err.localizedMessage}"
+                    )
+                )
+            }
+        }
+    }
+
     fun sendDirectAssistantVoice(audioFile: File, focusedRecordId: String?) {
         if (_isAssistantReplying.value) {
             audioFile.delete()
